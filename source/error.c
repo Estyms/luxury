@@ -1,3 +1,6 @@
+// This file will contain the language parser which is transforming the token stream from the lexer
+// into a graph representation. The 
+
 #include <error.h>
 #include <stdlib.h>
 #include <stdio.h>

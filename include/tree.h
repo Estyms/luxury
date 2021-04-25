@@ -6,13 +6,13 @@
 #include <list.h>
 
 enum ExpressionKind {
-    EXPRESSION_PRIMARY,
+    EXPRESSION_PRIMARY = 1,
     EXPRESSION_UNARY,
     EXPRESSION_BINARY
 };
 
 enum PrimaryKind {
-    PRIMARY_NUMBER,
+    PRIMARY_NUMBER = 1,
     PRIMARY_IDENTIFIER,
     PRIMARY_KIND_COUNT
 };
@@ -36,7 +36,7 @@ enum BinaryKind {
 };
 
 enum StatementKind {
-    STATEMENT_EXPRESSION,
+    STATEMENT_EXPRESSION = 1,
     STATEMENT_COMPOUND,
     STATEMENT_COMMENT,
     STATEMENT_RETURN,
@@ -44,7 +44,7 @@ enum StatementKind {
 };
 
 enum TypeKind {
-    TYPE_BASIC,
+    TYPE_BASIC = 1,
     TYPE_POINTER,
     TYPE_INFERRED,
     TYPE_UNKNOWN,
@@ -52,8 +52,7 @@ enum TypeKind {
 };
 
 enum DeclarationKind {
-    DECLARATION_ERROR,
-    DECLARATION_VARIABLE,
+    DECLARATION_VARIABLE = 1,
     DECLARATION_FUNCTION,
     DECLARATION_TYPE,
 };

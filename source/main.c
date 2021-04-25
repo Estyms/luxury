@@ -40,8 +40,8 @@ static u32 string_length(const char* data) {
 
 int main(int argument_count, char** arguments) {
     assert(argument_count == 3);
-    printf("Compiling : %s\n", arguments[1]);
-    printf("Output    : %s\n", arguments[2]);
+    printf("Input file  : %s\n", arguments[1]);
+    printf("Output file : %s\n", arguments[2]);
 
     String source_file;
     String source_file_name = (String){ .text = arguments[1], .size = string_length(arguments[1]) };
@@ -49,10 +49,8 @@ int main(int argument_count, char** arguments) {
     // We read the entire source file into memory.
     read_source_file(&source_file, arguments[1]);
 
-
-    Lexer* lexer = new_lexer(&source_file, &source_file_name);
+    Lexer* lexer   = new_lexer(&source_file, &source_file_name);
     Parser* parser = new_parser(lexer);
-
     
     printf("Parsing the program\n");
     Program* program = parser_program(parser);
@@ -61,6 +59,7 @@ int main(int argument_count, char** arguments) {
     print_program(program);
 
     Typer typer;
+    printf("Typing the program\n");
     type_program(program, &typer);
 
     printf("Generator is starting\n");
