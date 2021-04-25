@@ -4,6 +4,6 @@
 #include <types.h>
 #include <tree.h>
 
-void print_statement(Statement* statement);
+void print_program(Program* program);
 
 #endif

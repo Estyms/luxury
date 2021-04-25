@@ -7,6 +7,9 @@ typedef enum PrimaryKind PrimaryKind;
 typedef enum UnaryKind UnaryKind;
 typedef enum BinaryKind BinaryKind;
 typedef enum StatementKind StatementKind;
+typedef enum TypeKind TypeKind;
+typedef enum DeclarationKind DeclarationKind;
+typedef enum KeywordKind KeywordKind;
 
 typedef struct List List;
 typedef struct List ListNode;
@@ -20,5 +23,18 @@ typedef struct Unary Unary;
 typedef struct Primary Primary;
 typedef struct Statement Statement;
 typedef struct Compound Compound;
+typedef struct Comment Comment;
+typedef struct Program Program;
+typedef struct CodeUnit CodeUnit;
+typedef struct Scope Scope;
+typedef struct Declaration Declaration;
+typedef struct Type Type;
+typedef struct PointerType PointerType;
+typedef struct BasicType BasicType;
+typedef struct Function Function;
+typedef struct Variable Variable;
+typedef struct UnknownType UnknownType;
+typedef struct ReturnStatement ReturnStatement;
+typedef struct Typer Typer;
 
 #endif

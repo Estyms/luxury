@@ -1,6 +1,34 @@
 #include <tree.h>
 #include <stdlib.h>
 
+Scope* new_scope() {
+    Scope* scope = calloc(1, sizeof(Scope));
+
+    list_init(&scope->functions);
+    list_init(&scope->variables);
+    list_init(&scope->types);
+    list_init(&scope->child_scopes);
+
+    return scope;
+}
+
+Declaration* new_declaration() {
+    Declaration* declaration = calloc(1, sizeof(Declaration));
+    return declaration;
+}
+
+Program* new_program() {
+    Program* program = calloc(1, sizeof(Program));
+
+    list_init(&program->code_units);
+    return program;
+}
+
+CodeUnit* new_code_unit() {
+    CodeUnit* unit = calloc(1, sizeof(CodeUnit));
+    return unit;
+}
+
 void* new_statement(StatementKind kind) {
     Statement* statement = calloc(1, sizeof(Statement));
     statement->kind = kind;
@@ -19,7 +47,29 @@ void* new_expression(ExpressionKind kind) {
     return expression;
 }
 
-void* new_binary() {
+void* new_binary(BinaryKind kind) {
     Binary* binary = new_expression(EXPRESSION_BINARY);
+    binary->kind = kind;
     return binary;
+}
+
+void* new_primary(PrimaryKind kind) {
+    Primary* primary = new_expression(EXPRESSION_PRIMARY);
+    primary->kind = kind;
+    return primary;
+}
+
+void* new_type(TypeKind kind) {
+    Type* type = calloc(1, sizeof(Type));
+    type->kind = kind;
+    return type;
+}
+
+PointerType* new_pointer() {
+    Type* type = new_type(TYPE_POINTER);
+
+    type->size      = 8;
+    type->alignment = 8;
+
+    return (void *)type;
 }

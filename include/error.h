@@ -3,7 +3,8 @@
 
 #include <types.h>
 #include <lexer.h>
+#include <stdarg.h>
 
-void error_token(Token* token, const char* message);
+void error_token(Token* token, const char* message, ...);
 
 #endif

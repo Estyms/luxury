@@ -7,9 +7,11 @@
 
 struct Parser {
     Lexer* lexer;
+
+    Scope* current_scope;
 };
 
-Statement* parse_statement(Parser* parser);
+Program* parser_program(Parser* parser);
 Parser* new_parser(Lexer* lexer);
 
 #endif

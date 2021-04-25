@@ -1,5 +1,5 @@
-#include <str.h>
-#include <types.h>
+#include <string.h>
+#include <stdlib.h>
 
 bool string_compare(String* a, String* b) {
     if (a->size != b->size) {

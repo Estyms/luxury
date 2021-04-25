@@ -1,7 +1,7 @@
 #include <lexer.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <compiler_error.h>
+#include <error.h>
 
 static bool is_whitespace(char c) {
     return c == '\n' || c == '\r' || c == '\t' || c == ' ';
@@ -9,6 +9,21 @@ static bool is_whitespace(char c) {
 
 static bool is_number(char c) {
     return '0' <= c && c <= '9';
+}
+
+static bool is_valid_letter(char c) {
+    if (c == '_') {
+        return true;
+    }
+
+    // Convert from upper-case to lower-case.
+    c |= (1 << 5);
+
+    if ('a' <= c && c <= 'z') {
+        return true;
+    }
+
+    return false;
 }
 
 static char advance_lexer(Lexer* lexer) {
@@ -34,7 +49,13 @@ static char advance_lexer(Lexer* lexer) {
         lexer->column++;
     }
 
-    return c;
+    return lexer->cursor[0];
+}
+
+static void advance_lexer_with(Lexer* lexer, u32 count) {
+    while (count--) {
+        advance_lexer(lexer);
+    }
 }
 
 static void skip_whitespaces(Lexer* lexer) {
@@ -49,6 +70,7 @@ static void skip_punctuation(Lexer* lexer, u32 skip_count, Token* token, TokenKi
     token->kind      = kind;
 
     lexer->cursor += skip_count;
+    lexer->column += skip_count;
 }
 
 static void parse_puctuation(Lexer* lexer, Token* token) {
@@ -70,12 +92,25 @@ static void parse_puctuation(Lexer* lexer, Token* token) {
             skip_punctuation(lexer, 1, token, TOKEN_CLOSE_CURLY);
             break;
         }
+        case '[' : {
+            skip_punctuation(lexer, 1, token, TOKEN_OPEN_SQUARE);
+            break;
+        }
+        case ']' : {
+            skip_punctuation(lexer, 1, token, TOKEN_CLOSE_SQUARE);
+            break;
+        }
         case '+' : {
             skip_punctuation(lexer, 1, token, TOKEN_PLUS);
             break;
         }
         case '-' : {
-            skip_punctuation(lexer, 1, token, TOKEN_MINUS);
+            if (next == '>') {
+                skip_punctuation(lexer, 2, token, TOKEN_ARROW);
+            }
+            else {
+                skip_punctuation(lexer, 1, token, TOKEN_MINUS);
+            }
             break;
         }
         case '*' : {
@@ -89,6 +124,9 @@ static void parse_puctuation(Lexer* lexer, Token* token) {
         case '=' : {
             if (next == '=') {
                 skip_punctuation(lexer, 2, token, TOKEN_EQUAL);
+            }
+            else {
+                skip_punctuation(lexer, 1, token, TOKEN_ASSIGN);
             }
             break;
         }
@@ -112,6 +150,19 @@ static void parse_puctuation(Lexer* lexer, Token* token) {
         }
         case ';' : {
             skip_punctuation(lexer, 1, token, TOKEN_SEMICOLON);
+            break;
+        }
+        case ':' : {
+            if (next == ':') {
+                skip_punctuation(lexer, 2, token, TOKEN_DOUBLE_COLON);
+            }
+            else {
+                skip_punctuation(lexer, 1, token, TOKEN_COLON);
+            }
+            break;
+        }
+        case ',' : {
+            skip_punctuation(lexer, 1, token, TOKEN_COMMA);
             break;
         }
     }
@@ -176,6 +227,56 @@ static void parse_number(Lexer* lexer, Token* token) {
     token->name.size = lexer->cursor - token->name.text;
 }
 
+static void parse_identifier(Lexer* lexer, Token* token) {
+    token->name.text = lexer->cursor;
+    token->kind = TOKEN_IDENTIFIER;
+
+    char c = lexer->cursor[0];
+    while (is_number(c) || is_valid_letter(c)) {
+        c = advance_lexer(lexer);
+    }
+
+    token->name.size = lexer->cursor - token->name.text;
+}
+
+static void parse_comment(Lexer* lexer, Token* token) {
+    token->kind = TOKEN_COMMENT;
+
+    // We allready know that the two first characters are correct. 
+    advance_lexer_with(lexer, 2);
+    token->name.text = lexer->cursor;
+
+    if (lexer->cursor[0] == '(') {
+        u32 nesting_level = 1;
+       
+        while (1) {
+            if (lexer->cursor[0] == '/' && lexer->cursor[1] == '/') {
+                char c = lexer->cursor[2];
+                if (c == '(') {
+                    nesting_level++;
+                } 
+                else if (c == ')') {
+                    nesting_level--;
+                }
+
+                if (nesting_level == 0) {
+                    advance_lexer_with(lexer, 3);
+                    break;
+                }
+            }
+
+            advance_lexer(lexer);
+        }
+    }
+    else {
+        while (lexer->cursor[0] != '\r' && lexer->cursor[0] != '\n') {
+            advance_lexer(lexer);
+        }
+    }
+
+    token->name.size = lexer->cursor - token->name.text;
+}
+
 static void process_next_token(Lexer* lexer, Token* token) {
     assert(token->lexer);
     token->kind = TOKEN_NONE;
@@ -193,6 +294,12 @@ static void process_next_token(Lexer* lexer, Token* token) {
 
     if (is_number(c)) {
         parse_number(lexer, token);
+    }
+    else if (c == '/' && lexer->cursor[1] == '/') {
+        parse_comment(lexer, token);
+    }
+    else if (is_valid_letter(c)) {
+        parse_identifier(lexer, token);
     }
     else {
         parse_puctuation(lexer, token);
@@ -214,7 +321,7 @@ Lexer* new_lexer(String* file, String* file_name) {
     lexer->file_name.text = file_name->text;
 
     lexer->column = 0;
-    lexer->line   = 0;
+    lexer->line   = 1;
 
     lexer->cursor = lexer->file.text;
 
@@ -311,15 +418,91 @@ Token* consume_token(Lexer* lexer) {
     return token;
 }
 
-Token* expect_token(Lexer* lexer, TokenKind kind) {
+static const char* token_kind[] = {
+    "none",
+    "end of file",
+    "a number",
+    "an identifier",
+    "a comment",
+    "+", 
+    "-", 
+    "*",
+    "/",
+    "==",
+    "<",
+    "<=",
+    ">",
+    ">=",
+    "=",
+    "(",
+    ")",
+    "{",
+    "}",
+    "[",
+    "]",
+    ";",
+    ":",
+    "::"
+    "->",
+    ","
+};
 
+Token* expect_token(Lexer* lexer, TokenKind kind) {
+    Token* token = next_token(lexer);
+    if (token->kind != kind) {
+        assert(token->kind < TOKEN_KIND_COUNT);
+        assert(kind < TOKEN_KIND_COUNT);
+
+        error_token(token, "expecting %s but got %s", token_kind[kind], token_kind[token->kind]);
+    }
+
+    return token;
 }
 
 Token* skip_token(Lexer* lexer, TokenKind kind) {
     Token* token = current_token(lexer);
     if (token->kind != kind) {
-        error_token(token, "skip token failed");
+        assert(token->kind < TOKEN_KIND_COUNT);
+        assert(kind < TOKEN_KIND_COUNT);
+
+        error_token(token, "expecting %s but got %s", token_kind[kind], token_kind[token->kind]);
     }
 
-    next_token(lexer);
+    return next_token(lexer);
+}
+
+static const char* keywords[] = {
+    "func",
+    "u64",
+    "u32",
+    "u16",
+    "u8",
+    "s64",
+    "s32",
+    "s16",
+    "s8",
+    "char",
+    "return"
+};
+
+bool is_keyword(Token* token, KeywordKind kind) {
+    if (kind >= KEYWORD_KIND_COUNT) {
+        printf("Keyword not handled\n");
+        exit(1);
+    }
+
+    const char* a = token->name.text;
+    const char* b = keywords[kind];
+
+    for (u32 i = 0; i < token->name.size; i++, a++, b++) {
+        if (*b == 0 || *a != *b) {
+            return false;
+        }
+    }
+
+    if (*b) {
+        return false;
+    }
+
+    return true;
 }
