@@ -21,7 +21,7 @@ u32 indentation;
 bool mask[MAX_INDENTATION];
 
 static void print_scope(Scope* scope);
-static void print_type(Type* type);
+static void print_type(Type* type, bool print_all);
 static void print_expression(Expression* expression);
 static void print_function(Declaration* decl);
 static void print_statement(Statement* statement);
@@ -87,7 +87,7 @@ static const char* binary_kind[] = {
 
 static void print_expression(Expression* expression) {
     if (expression->type) {
-        print_type(expression->type);
+        print_type(expression->type, false);
     }
     switch (expression->kind) {
         case EXPRESSION_UNARY : {
@@ -97,6 +97,15 @@ static void print_expression(Expression* expression) {
             indented_print("Unary: %s\n", unary_kind[unary->kind]);
             indentation++;
             print_expression(unary->operand);
+            indentation--;
+            break;
+        }
+        case EXPRESSION_DOT : {
+            Dot* dot = &expression->dot;
+
+            indented_print("Dot: %.*s\n", dot->member->name.size, dot->member->name.text);
+            indentation++;
+            print_expression(dot->expression);
             indentation--;
             break;
         }
@@ -192,7 +201,43 @@ static void print_function(Declaration* decl) {
     indentation--;
 }
 
-static void print_type(Type* type) {
+static void print_struct(Type* type, bool print_all) {
+    StructType* Struct = &type->Struct;
+
+    colored_indented_print(KGRN, "Struct size: %d align: %d: %s\n", type->size, type->alignment, (Struct->scope) ? "" : "anonymous");
+    if (!print_all) {
+        return;
+    }
+
+    u32 struct_indent = indentation++;
+    mask[struct_indent] = true;
+
+    ListNode* it;
+    list_iterate(it, &Struct->members) {
+        StructMember* member = list_to_struct(it, StructMember, list_node);
+
+        if (it->next == &Struct->members) {
+            mask[struct_indent] = false;
+        }
+
+        colored_indented_print(KGRN, "Struct member: offset %d\n", member->offset);
+        u32 member_indent = indentation++;
+
+        if (member->is_anonymous == false) {
+            String name = member->name;
+            colored_indented_print(KGRN, "Name : %.*s\n", name.size, name.text);
+        }
+
+        assert(member->type);
+        print_type(member->type , print_all);
+        indentation--;
+    }
+
+    mask[struct_indent] = false;
+    indentation--;
+}
+
+static void print_type(Type* type, bool print_all) {
     switch (type->kind) {
         case TYPE_UNKNOWN : {
             String name = type->unknown.token->name;
@@ -214,9 +259,13 @@ static void print_type(Type* type) {
             indentation++;
             
             printf(KGRN);
-            print_type(type->pointer.pointer_to);
+            print_type(type->pointer.pointer_to, print_all);
             printf(KNRM);
             indentation--;
+            break;
+        }
+        case TYPE_STRUCT : {
+            print_struct(type, print_all);
             break;
         }
         case TYPE_BASIC : {
@@ -261,11 +310,10 @@ static void print_scope(Scope* scope) {
         indented_print("Declaration : %.*s\n", name.size, name.text);
 
         indentation++;
-        print_type(decl->type);
+        print_type(decl->type, true);
         indentation--;
     }
 
-    // This is not a type, but a typedef.
     list_iterate(it, &scope->types) {
         Declaration* decl = list_to_struct(it, Declaration, list_node);
         assert(decl->kind == DECLARATION_TYPE);
@@ -277,7 +325,7 @@ static void print_scope(Scope* scope) {
         String name = decl->name;
         indented_print("Typedef: %.*s\n", name.size, name.text);
         indentation++;
-        print_type(decl->type);
+        print_type(decl->type, true);
         indentation--;
     }
 
@@ -318,20 +366,24 @@ static void print_statement(Statement* statement) {
 
             mask[loop_indent] = true;
 
-            indented_print("Init: \n");
-            indentation++;
-            print_statement(loop->init_statement);
-            indentation--;
+            if (loop->init_statement) {
+                indented_print("Init: \n");
+                indentation++;
+                print_statement(loop->init_statement);
+                indentation--;
+            }
 
             indented_print("Condition: \n");
             indentation++;
             print_expression(loop->condition);
             indentation--;
 
-            indented_print("Post statement: \n");
-            indentation++;
-            print_statement(loop->post_statement);
-            indentation--;
+            if (loop->post_statement) {
+                indented_print("Post statement: \n");
+                indentation++;
+                print_statement(loop->post_statement);
+                indentation--;
+            }
 
             mask[loop_indent] = false;
 

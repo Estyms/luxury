@@ -39,5 +39,10 @@ typedef struct Typer Typer;
 typedef struct Call Call;
 typedef struct Loop Loop;
 typedef struct Conditional Conditional;
+typedef struct Array Array;
+typedef struct StructMember StructMember;
+typedef struct StructType StructType;
+typedef struct StructScope StructScope;
+typedef struct Dot Dot;
 
 #endif

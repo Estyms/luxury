@@ -69,6 +69,8 @@ enum KeywordKind {
     KEYWORD_IF,
     KEYWORD_ELSE,
     KEYWORD_IN,
+    KEYWORD_STRUCT,
+    KEYWORD_UNION,
 
     KEYWORD_KIND_COUNT
 };

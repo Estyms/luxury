@@ -17,6 +17,11 @@ extern Type* type_char;
 
 struct Typer {
     Scope* current_scope;  
+
+    StructType* current_struct;
+
+    bool type_resolved;
+    bool unresolved_types;
 };
 
 void type_program(Program* programs, Typer* typer);

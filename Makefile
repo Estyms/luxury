@@ -12,6 +12,7 @@ source += source/tree.c
 source += source/tree_printer.c
 source += source/generator.c
 source += source/typer.c
+source += source/array.c
 
 include += include/list.h
 include += include/string.h
@@ -24,6 +25,7 @@ include += include/tree.h
 include += include/tree_printer.h
 include += include/generator.h
 include += include/typer.h
+include += include/array.h
 
 flags += -Wno-unused-function -Wall -std=c11 -g -Wno-comment
 flags += -Wno-switch -fno-common -Wno-unused-variable -Wno-return-type
@@ -34,7 +36,8 @@ include_global = $(addprefix $(top)/, $(include))
 all: luxury
 	@build/luxury $(test) build/output.s
 	@gcc -static -o $(build)/output $(build)/output.s
-	@$(build)/output hello this is a little test
+	@$(build)/output
+
 
 compile: 
 	@gcc -static -o $(build)/output $(build)/output.s

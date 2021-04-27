@@ -55,7 +55,9 @@ static const char* keywords[] = {
     "while",
     "if",
     "else",
-    "in"
+    "in",
+    "struct",
+    "union",
 };
 
 static bool is_whitespace(char c) {

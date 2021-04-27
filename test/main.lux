@@ -1,5 +1,15 @@
 
+Number :: struct {
+    number : u64;
+}
+
+print_number : func (pointer : * Number) {
+    printf("Number is : %d\n", pointer.number);
+}
+
 main : func (argument_count: u64, arguments: **char) {
-    
-   
+    for i in 0..argument_count - 1 {
+        printf("Argument : %s\n", arguments[i]);
+    }
+
 }

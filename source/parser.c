@@ -21,8 +21,7 @@ static Statement* parse_compound_statement(Parser* parser);
 static Statement* parse_expression_statement(Parser* parser);
 static Statement* parse_block(Parser* parser);
 static Statement* parse_compound_statement(Parser* parser);
-
-
+static Type* parse_struct_declaration(Parser* parser, bool is_anonymous);
 
 static void push_declaration_on_scope(Declaration* declaration, Scope* scope);
 static void push_declaration_on_current_scope(Declaration* declaration, Parser* parser);
@@ -202,6 +201,16 @@ static Expression* parse_suffix_expression(Parser* parser, Expression* previous)
 
         return parse_suffix_expression(parser, (Expression *)unary);
     }
+    else if (token->kind == TOKEN_DOT) {
+        Dot* dot = new_expression(EXPRESSION_DOT);
+
+        dot->dot_token  = copy_token(token);
+        dot->member     = copy_token(current_token(lexer));
+        skip_token(lexer, TOKEN_IDENTIFIER);
+        dot->expression = previous;
+        
+        return parse_suffix_expression(parser, (Expression *)dot);
+    }
 
     undo_next_token(lexer);
     return previous;
@@ -271,7 +280,14 @@ static Statement* parse_if_statement(Parser* parser) {
 }
 
 static Statement* parse_while_statement(Parser* parser) {
+    Lexer* lexer = parser->lexer;
+    Token* token = next_token(lexer);
 
+    Loop* loop = new_statement(STATEMENT_LOOP);
+    loop->condition = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+    loop->body = parse_compound_statement(parser);
+
+    return (Statement *)loop;
 }
 
 // for i in 0..5
@@ -365,6 +381,9 @@ static Statement* parse_statement(Parser* parser) {
     }
     else if (is_keyword(token, KEYWORD_IF)) {
         return parse_if_statement(parser);
+    }
+    else if (is_keyword(token, KEYWORD_WHILE)) {
+        return parse_while_statement(parser);
     }
 
     return parse_expression_statement(parser);
@@ -474,6 +493,116 @@ static void parse_function_argument(Parser* parser) {
     push_declaration_on_current_scope(declaration, parser);
 }
 
+static StructScope* enter_struct_scope(Parser* parser) {
+    printf("enter new scope\n");
+    StructScope* scope = new_struct_scope();
+
+    scope->parent = parser->current_struct_scope;
+    parser->current_struct_scope = scope;
+
+    return scope;
+}
+
+static void exit_struct_scope(Parser* parser) {
+    printf("exit current scope\n");
+    assert(parser->current_struct_scope);
+    parser->current_struct_scope = parser->current_struct_scope->parent;
+}
+
+static StructMember* parse_struct_member(Parser* parser) {
+    Lexer* lexer = parser->lexer;
+    Token* token = current_token(lexer);
+
+    assert(parser->current_struct_scope);
+
+    if (token->kind != TOKEN_IDENTIFIER) {
+        error_token(token, "expecting either a tag or a struct / union keyword.");
+    }
+
+    StructMember* member = new_struct_member();
+    member->is_anonymous = true;
+
+    if (!is_keyword(token, KEYWORD_STRUCT) && !is_keyword(token, KEYWORD_UNION)) {
+        member->is_anonymous = false;
+        member->name         = token->name;
+        member->token        = copy_token(token);
+
+        token = skip_token(lexer, TOKEN_IDENTIFIER);
+        token = skip_token(lexer, TOKEN_COLON);
+    }
+
+    if (is_keyword(token, KEYWORD_STRUCT) || is_keyword(token, KEYWORD_UNION)) {
+        member->type = parse_struct_declaration(parser, member->is_anonymous);
+    }
+    else {
+        member->type = parse_type(parser);
+        skip_token(lexer, TOKEN_SEMICOLON);
+    }
+
+    return member;
+}
+
+static void push_struct_member_on_current_scope(StructMember* member, Parser* parser) {
+    // We are not pushing anonymous members on the current scope. They will be tracked by the tree
+    // structure.
+    if (member->is_anonymous) {
+        return;
+    }
+
+    list_add_last(&member->scope_node, &parser->current_struct_scope->members);
+}
+
+static bool does_struct_member_exist(StructMember* member, Parser* parser) {
+    ListNode* it;
+    list_iterate(it, &parser->current_struct_scope->members) {
+        StructMember* scope_member = list_to_struct(it, StructMember, scope_node);
+
+        assert(scope_member->is_anonymous == false);
+        if (string_compare(&member->name, &scope_member->name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static Type* parse_struct_declaration(Parser* parser, bool is_anonymous) {
+    Lexer* lexer = parser->lexer;
+    Token* token = consume_token(lexer);
+
+    StructType* type = new_struct();
+
+    type->is_struct = is_keyword(token, KEYWORD_STRUCT);
+    if (!is_anonymous) {
+        // This is a tagged structure so we have to open a new scope.
+        type->scope = enter_struct_scope(parser);
+    }
+
+    token = skip_token(lexer, TOKEN_OPEN_CURLY);
+
+    while (token->kind != TOKEN_CLOSE_CURLY && token->kind != TOKEN_END_OF_FILE) {
+        StructMember* member = parse_struct_member(parser);
+        
+        list_add_last(&member->list_node, &type->members);
+
+        
+        if (does_struct_member_exist(member, parser)) {
+            error_token(member->token, "struct declaration is defined before");
+        }
+
+        push_struct_member_on_current_scope(member, parser);
+        token = current_token(lexer);
+    }
+
+    skip_token(lexer, TOKEN_CLOSE_CURLY);
+
+    if (!is_anonymous) {
+        exit_struct_scope(parser);
+    }
+
+    return (Type *)type;
+}
+
 // If a declaration is parsed successfully and pushed to the scope, this funciton returns true. If
 // the declaration also contains an init expression, we convert it to an expression statement and 
 // return that as an init_statement.
@@ -539,6 +668,15 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
 
         function->body = parse_compound_statement(parser);
         exit_scope(parser);
+
+        push_declaration_on_current_scope(declaration, parser);
+        return true;
+    }
+    else if (is_keyword(token, KEYWORD_STRUCT) || is_keyword(token, KEYWORD_UNION)) {
+        declaration->kind = (is_typedef) ? DECLARATION_TYPE : DECLARATION_VARIABLE;
+        declaration->type = parse_struct_declaration(parser, false);
+
+        assert(parser->current_struct_scope == 0);
 
         push_declaration_on_current_scope(declaration, parser);
         return true;
@@ -630,10 +768,6 @@ static Declaration* does_declaration_exist(Declaration* declaration, Scope* scop
         }
     }
 
-    if (scope->parent) {
-        return does_declaration_exist(declaration, scope->parent);
-    }
-
     return 0;
 }
 
@@ -713,6 +847,15 @@ Parser* new_parser(Lexer* lexer) {
 static CodeUnit* parser_code_unit(Parser* parser) {
     Statement* statement = parse_block(parser);
     assert(statement->kind == STATEMENT_COMPOUND);
+    assert(statement->compound.scope->parent == 0);
+
+    // Go over all the global variables and mask everything as global.
+    ListNode* it;
+    list_iterate(it, &statement->compound.scope->variables) {
+        Declaration* declaration = list_to_struct(it, Declaration, list_node);
+
+        declaration->is_global = true;
+    }
 
     CodeUnit* code_unit = new_code_unit();
 

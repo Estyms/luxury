@@ -5,6 +5,7 @@
 #include <list.h>
 #include <assert.h>
 #include <error.h>
+#include <array.h>
 
 static void generate_statement(Statement* statement);
 static void generate_expression(Expression* expression);
@@ -14,19 +15,40 @@ const char* argument_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
 File* file;
 u32 stack_level = 0;
 Declaration* current_function_declaration;
+Array* data_segment;
 
-void emit(const char* text, ...) {
+void emit(const char* data, ...) {
     static char buffer[1024];
 
     va_list arg;
-    va_start(arg, text);
-    u32 size = vsnprintf(buffer, 1024, text, arg);
+    va_start(arg, data);
+    u32 size = vsnprintf(buffer, 1024, data, arg);
     va_end(arg);
 
     fwrite(buffer, 1, size, file);
     fputc('\n', file);
 }
 
+void emit_data(const char* data, ...) {
+    va_list arg;
+    va_start(arg, data);
+    array_add_va_list(data_segment, data, arg);
+    va_end(arg);
+
+    array_add(data_segment, "\n");
+}
+
+void emit_data_segment() {
+    if (data_segment->size == 0) {
+        return;
+    }
+
+    emit("");
+    emit("    .data");
+
+    fwrite(data_segment->buffer, 1, data_segment->size, file);
+    data_segment->size = 0;
+}
 
 void push_rax() {
     emit("    push %%rax");
@@ -46,10 +68,21 @@ void pop(const char* reg) {
 static void generate_address(Expression* expression) {
     if (is_variable(expression)) {
         assert(expression->primary.declaration);
-        emit("    lea %d(%%rbp), %%rax", expression->primary.declaration->variable.offset);
+
+        if (expression->primary.declaration->is_global) {
+            String name = expression->primary.declaration->name;
+            emit("    lea %.*s, %%rax", name.size, name.text);
+        }
+        else {
+            emit("    lea %d(%%rbp), %%rax", expression->primary.declaration->variable.offset);
+        }
     }
     else if (is_deref(expression)) {
         generate_expression(expression->unary.operand);
+    }
+    else if (expression->kind == EXPRESSION_DOT) {
+        generate_address(expression->dot.expression);
+        emit("    add $%d, %%rax", expression->dot.offset);
     }
     else {
         printf("Generator (address) : cannot generate address of this.\n");
@@ -64,11 +97,21 @@ static void load_from_rax(Type* type) {
         return;
     }
 
-    emit("    mov (%%rax), %%rax");
+    switch (type->size) {
+        case 1 : emit("    movsbq (%%rax), %%rax"); break;
+        case 2 : emit("    movswq   (%%rax), %%rax"); break;
+        case 4 : emit("    movslq   (%%rax), %%rax"); break;
+        case 8 : emit("    movq   (%%rax), %%rax"); break;
+    }
 }
 
 static void store_to_rax_address(Type* type) {
-    emit("    mov %%rdi, (%%rax)");
+    switch (type->size) {
+        case 1 : emit("    movb %%dil, (%%rax)"); break;
+        case 2 : emit("    movw %%di, (%%rax)"); break;
+        case 4 : emit("    movl %%edi, (%%rax)"); break;
+        case 8 : emit("    movq %%rdi, (%%rax)"); break;
+    }
 }
 
 static void generate_binary_expression(Expression* expression) {
@@ -167,11 +210,11 @@ static void generate_primary_expression(Expression* expression) {
         }
         case PRIMARY_STRING : {
             static u32 string_number = 0;
-        
-            emit("    .data");
-            emit("string.%d:", string_number);
-            emit("    .string \"%.*s\"", primary->string.size, primary->string.text);
-            emit("    .text");
+
+            // Just emit the string.
+            emit_data("string.%d:", string_number);
+            emit_data("    .string \"%.*s\"", primary->string.size, primary->string.text);
+
             emit("    lea string.%d, %%rax", string_number);
 
             string_number++;
@@ -222,6 +265,11 @@ static void generate_call_expression(Expression* expression) {
     emit("    call %.*s", name.size, name.text);
 }
 
+static void generate_dot_expression(Expression* expression) {
+    generate_address(expression);
+    load_from_rax(expression->type);
+}
+
 static void generate_expression(Expression* expression) {
     assert(expression);
 
@@ -240,6 +288,10 @@ static void generate_expression(Expression* expression) {
         }
         case EXPRESSION_CALL : {
             generate_call_expression(expression);
+            break;
+        }
+        case EXPRESSION_DOT : {
+            generate_dot_expression(expression);
             break;
         }
         default : {
@@ -272,7 +324,9 @@ static void generate_loop_statement(Statement* statement) {
     Loop* loop = &statement->loop;
     u32 number = loop_counter++;
 
-    generate_statement(loop->init_statement);
+    if (loop->init_statement) {
+        generate_statement(loop->init_statement);
+    }
     emit("loop.start.%d:", number);
 
     generate_expression(loop->condition);
@@ -280,7 +334,10 @@ static void generate_loop_statement(Statement* statement) {
     emit("    je loop.end.%d", number);
 
     generate_statement(loop->body);
-    generate_statement(loop->post_statement);
+
+    if (loop->post_statement) {
+        generate_statement(loop->post_statement);
+    }
     emit("    jmp loop.start.%d", number);
 
     emit("loop.end.%d:", number);
@@ -363,8 +420,9 @@ static u32 compute_locals_from_scope(Scope* scope, u32 offset) {
 
     list_iterate(it, &scope->variables) {
         Declaration* decl = list_to_struct(it, Declaration, list_node);
-
         assert(decl->type);
+        String name = decl->name;
+        //printf("assigning stack : %.*s with size %d\n", name.size, name.text, decl->type->size);
 
         offset += decl->type->size;
         offset = align(offset, decl->type->alignment);
@@ -415,6 +473,8 @@ static void generate_function(Declaration* declaration) {
     emit("    mov %%rbp, %%rsp");
     emit("    pop %%rbp");
     emit("    ret");
+
+    emit_data_segment();
 }
 
 static void generate_scope(Scope* scope) {
@@ -424,6 +484,19 @@ static void generate_scope(Scope* scope) {
         assert(decl->kind == DECLARATION_FUNCTION);
         generate_function(decl);
     }
+
+    if (scope->parent == 0) {
+        // Global scope.
+        ListNode* it;
+        list_iterate(it, &scope->variables) {
+            Declaration* declaration = list_to_struct(it, Declaration, list_node);
+
+            emit_data("%.*s:", declaration->name.size, declaration->name.text);
+            emit_data("    .zero %d", declaration->type->size);
+        }
+    }
+
+    emit_data_segment();
 }
 
 static void generate_code_unit(CodeUnit* code_unit) {
@@ -450,4 +523,6 @@ void generator_init(const char* output_file) {
     if (file == 0) {
         exit(56);
     }
+
+    data_segment = new_array();
 }

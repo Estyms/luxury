@@ -10,6 +10,7 @@ enum ExpressionKind {
     EXPRESSION_UNARY,
     EXPRESSION_BINARY,
     EXPRESSION_CALL,
+    EXPRESSION_DOT,
 };
 
 enum PrimaryKind {
@@ -54,6 +55,7 @@ enum TypeKind {
     TYPE_POINTER,
     TYPE_INFERRED,
     TYPE_UNKNOWN,
+    TYPE_STRUCT,
     TYPE_KIND_COUNT
 };
 
@@ -97,12 +99,20 @@ struct Call {
     List arguments;   // Expressions.
 };
 
+struct Dot {
+    Token* dot_token;
+    Token* member;
+    u32 offset;
+    Expression* expression;
+};
+
 struct Expression {
     union {
         Binary  binary;
         Unary   unary;
         Primary primary;
         Call    call;
+        Dot     dot;
     };
 
     ExpressionKind kind;
@@ -163,11 +173,40 @@ struct UnknownType {
     Token* token;
 };
 
+struct StructScope {
+    StructScope* parent;
+    List members;
+    bool typing_complete;
+};
+
+struct StructType {
+    // List of struct members.
+    List members;
+
+    bool is_struct;
+    StructScope* scope;
+};
+
+struct StructMember {
+    ListNode list_node;
+    ListNode scope_node;
+
+    bool is_anonymous;
+
+    Type* type;
+    String name;
+
+    Token* token;
+
+    u32 offset;
+};
+
 struct Type {
     union {
         PointerType  pointer;
         BasicType    basic;
         UnknownType  unknown;
+        StructType   Struct;
     };
 
     TypeKind kind;
@@ -191,6 +230,8 @@ struct Declaration {
         Variable variable;  
         Function function;
     };
+
+    bool is_global;
 
     DeclarationKind kind;
     Token* name_token;
@@ -243,8 +284,13 @@ void* new_primary(PrimaryKind kind);
 Call* new_call();
 Unary* new_unary(UnaryKind kind);
 
+StructType* new_struct();
+StructMember* new_struct_member();
+StructScope* new_struct_scope();
+
 
 bool is_deref(Expression* expression);
 bool is_variable(Expression* expression);
+bool is_inferred(Expression* expression);
 
 #endif

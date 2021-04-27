@@ -81,5 +81,5 @@ void error_token(Token* token, const char* message, ...) {
     printf("%.*s\n", size, buffer);
 
     printf("\n");
-    exit(0);
+    exit(1);
 }

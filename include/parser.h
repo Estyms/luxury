@@ -9,6 +9,7 @@ struct Parser {
     Lexer* lexer;
 
     Scope* current_scope;
+    StructScope* current_struct_scope;
 };
 
 Program* parser_program(Parser* parser);
