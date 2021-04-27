@@ -40,6 +40,7 @@ static u32 string_length(const char* data) {
 
 int main(int argument_count, char** arguments) {
     assert(argument_count == 3);
+
     printf("Input file  : %s\n", arguments[1]);
     printf("Output file : %s\n", arguments[2]);
 
@@ -51,18 +52,17 @@ int main(int argument_count, char** arguments) {
 
     Lexer* lexer   = new_lexer(&source_file, &source_file_name);
     Parser* parser = new_parser(lexer);
+    Typer typer;
     
-    printf("Parsing the program\n");
+    // Build the syntax tree.
     Program* program = parser_program(parser);
-
-    printf("Printing the program\n");
     print_program(program);
 
-    Typer typer;
-    printf("Typing the program\n");
+    // Type the syntax tree.
     type_program(program, &typer);
+    print_program(program);
 
-    printf("Generator is starting\n");
+    // Generate the output file from the typed syntax tree.
     generator_init(arguments[2]);
     generate_program(program);
 }

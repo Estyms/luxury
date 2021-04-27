@@ -1,7 +1,7 @@
 top    = $(shell pwd)
 build  = $(top)/build
 target = $(build)/luxury
-test   = main.lux
+test   = test/main.lux
 
 source += source/string.c
 source += source/main.c
@@ -30,16 +30,15 @@ flags += -Wno-switch -fno-common -Wno-unused-variable -Wno-return-type
 
 source_global  = $(addprefix $(top)/, $(source))
 include_global = $(addprefix $(top)/, $(include))
-test_file      = $(addprefix $(top)/test/, $(test))
 
 all: luxury
-	@build/luxury $(test_file) $(build)/output.s
+	@build/luxury $(test) build/output.s
 	@gcc -static -o $(build)/output $(build)/output.s
-	@$(build)/output
+	@$(build)/output hello this is a little test
 
 compile: 
 	@gcc -static -o $(build)/output $(build)/output.s
-	@$(build)/output	
+	@$(build)/output || exit 1;
 
 luxury: $(include_global)
 	@mkdir -p $(build)

@@ -1,14 +1,5 @@
-main : func () {
+
+main : func (argument_count: u64, arguments: **char) {
     
-    // Assigning.
-    data : int = 56 * 10 - 5;
-
-    // Assigning var.
-    var : int = data - 54 - (data == 555);
-
-    int :: u64;
-
-
-    // Returning.
-    return var;
+   
 }

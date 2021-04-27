@@ -4,12 +4,16 @@
 #include <stdarg.h>
 #include <list.h>
 #include <assert.h>
+#include <error.h>
 
 static void generate_statement(Statement* statement);
-static void generate_binary_expression(Binary* binary);
 static void generate_expression(Expression* expression);
 
+const char* argument_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+
 File* file;
+u32 stack_level = 0;
+Declaration* current_function_declaration;
 
 void emit(const char* text, ...) {
     static char buffer[1024];
@@ -23,7 +27,6 @@ void emit(const char* text, ...) {
     fputc('\n', file);
 }
 
-u32 stack_level = 0;
 
 void push_rax() {
     emit("    push %%rax");
@@ -35,34 +38,52 @@ void pop_rdi() {
     stack_level--;
 }
 
+void pop(const char* reg) {
+    emit("    pop %%%s", reg);
+    stack_level--;
+}
+
 static void generate_address(Expression* expression) {
-    if (expression->kind == EXPRESSION_PRIMARY) {
-        Primary* primary = &expression->primary;
-        if (primary->kind == PRIMARY_IDENTIFIER) {
-            assert(primary->declaration);
-            emit("    lea %d(%%rbp), %%rax", primary->declaration->variable.offset);
-        }
+    if (is_variable(expression)) {
+        assert(expression->primary.declaration);
+        emit("    lea %d(%%rbp), %%rax", expression->primary.declaration->variable.offset);
+    }
+    else if (is_deref(expression)) {
+        generate_expression(expression->unary.operand);
+    }
+    else {
+        printf("Generator (address) : cannot generate address of this.\n");
+        exit(1);
     }
 }
 
-static void load_from_rax() {
+static void load_from_rax(Type* type) {
+    assert(type);
+
+    if (type->kind == TYPE_POINTER && type->pointer.count) {
+        return;
+    }
+
     emit("    mov (%%rax), %%rax");
 }
 
-static void store_to_rax_address() {
+static void store_to_rax_address(Type* type) {
     emit("    mov %%rdi, (%%rax)");
 }
 
-static void generate_binary_expression(Binary* binary) {
+static void generate_binary_expression(Expression* expression) {
+    Binary* binary = &expression->binary;
+
     assert(binary->right);
     assert(binary->left);
 
     if (binary->kind == BINARY_ASSIGN) {
         generate_expression(binary->right);
         push_rax();
+        
         generate_address(binary->left);
         pop_rdi();
-        store_to_rax_address();
+        store_to_rax_address(expression->type);
         return;
     }
 
@@ -97,31 +118,31 @@ static void generate_binary_expression(Binary* binary) {
         case BINARY_EQUAL : {
             emit("    cmp %%rdi, %%rax");
             emit("    sete %%al");
-            emit("    movzbl %%al, %%eax");
+            emit("    movzb %%al, %%eax");
             break;
         }
         case BINARY_LESS : {
             emit("    cmp %%rdi, %%rax");
             emit("    setl %%al");
-            emit("    movzbl %%al, %%eax");
+            emit("    movzb %%al, %%eax");
             break;
         }
         case BINARY_LESS_EQUAL : {
             emit("    cmp %%rdi, %%rax");
             emit("    setle %%al");
-            emit("    movzbl %%al, %%eax");
+            emit("    movzb %%al, %%eax");
             break;
         }
         case BINARY_GREATER : {
             emit("    cmp %%rdi, %%rax");
             emit("    setg %%al");
-            emit("    movzbl %%al, %%eax");
+            emit("    movzb %%al, %%eax");
             break;
         }
         case BINARY_GREATER_EQUAL : {
             emit("    cmp %%rdi, %%rax");
             emit("    setge %%al");
-            emit("    movzbl %%al, %%eax");
+            emit("    movzb %%al, %%eax");
             break;
         }
         default : {
@@ -131,49 +152,169 @@ static void generate_binary_expression(Binary* binary) {
     }
 }
 
+static void generate_primary_expression(Expression* expression) {
+    Primary* primary = &expression->primary;
+
+    switch (primary->kind) {
+        case PRIMARY_NUMBER : {
+            emit("    mov $%d, %%rax", primary->number);
+            break;
+        }
+        case PRIMARY_IDENTIFIER : {
+            generate_address(expression);
+            load_from_rax(expression->type);
+            break;
+        }
+        case PRIMARY_STRING : {
+            static u32 string_number = 0;
+        
+            emit("    .data");
+            emit("string.%d:", string_number);
+            emit("    .string \"%.*s\"", primary->string.size, primary->string.text);
+            emit("    .text");
+            emit("    lea string.%d, %%rax", string_number);
+
+            string_number++;
+            break;
+        }
+        default : {
+            printf("Generator : primary expression not handled %d \n", primary->kind);
+            exit(1);
+        }
+    }
+}
+
+static void generate_unary_expression(Expression* expression) {
+    Unary* unary = &expression->unary;
+
+    if (unary->kind == UNARY_DEREF) {
+        generate_expression(unary->operand);
+        load_from_rax(expression->type);
+    }
+    else if (unary->kind == UNARY_ADDRESS_OF) {
+        generate_address(unary->operand);
+    }
+    else {
+        printf("Generator : unary expression is not handled\n");
+        exit(1);
+    }
+}
+
+static void generate_call_expression(Expression* expression) {
+    Call* call = &expression->call;
+
+    u32 argument_count = 0;
+    ListNode* it;
+    list_iterate(it, &call->arguments) {
+        Expression* expr = list_to_struct(it, Expression, list_node);
+        generate_expression(expr);
+        push_rax();
+        argument_count++;
+    }
+
+    while(argument_count--) {
+        pop(argument_registers[argument_count]);
+    }
+
+    emit("    mov $0, %%rax");
+
+    String name = call->expression->primary.name;
+    emit("    call %.*s", name.size, name.text);
+}
+
 static void generate_expression(Expression* expression) {
     assert(expression);
 
     switch (expression->kind) {
         case EXPRESSION_PRIMARY : {
-            Primary* primary = &expression->primary;
-
-            if (primary->kind == PRIMARY_NUMBER) {
-                emit("    mov $%d, %%rax", primary->number);
-            }
-            else if (primary->kind == PRIMARY_IDENTIFIER) {
-                generate_address(expression);
-                load_from_rax();
-            }
-            else {
-                printf("primary expression not handled\n");
-                exit(1);
-            }
+            generate_primary_expression(expression);
             break;
         }
         case EXPRESSION_UNARY : {
-            exit(2134);
+            generate_unary_expression(expression);
             break;
         }
         case EXPRESSION_BINARY : {
-            generate_binary_expression(&expression->binary);
+            generate_binary_expression(expression);
             break;
+        }
+        case EXPRESSION_CALL : {
+            generate_call_expression(expression);
+            break;
+        }
+        default : {
+            printf("Generator : expression kind is not handled\n");
+            exit(1);
         }
     }
 }
 
-Declaration* function_decl;
+static void generate_compound_statement(Statement* statement) {
+    Compound* compound = &statement->compound;
+
+    ListNode* it;
+    list_iterate(it, &compound->statements) {
+        Statement* statement = list_to_struct(it, Statement, list_node);
+        generate_statement(statement);
+    }
+}
+
+static void generate_return_statement(Statement* statement) {
+    generate_expression(statement->Return.return_expression);
+    assert(current_function_declaration);
+    String name = current_function_declaration->name;
+    emit("    jmp end.%.*s", name.size, name.text);
+}
+
+static void generate_loop_statement(Statement* statement) {
+    static u32 loop_counter = 0;
+
+    Loop* loop = &statement->loop;
+    u32 number = loop_counter++;
+
+    generate_statement(loop->init_statement);
+    emit("loop.start.%d:", number);
+
+    generate_expression(loop->condition);
+    emit("    cmp $0, %%rax");
+    emit("    je loop.end.%d", number);
+
+    generate_statement(loop->body);
+    generate_statement(loop->post_statement);
+    emit("    jmp loop.start.%d", number);
+
+    emit("loop.end.%d:", number);
+}
+
+static void generate_conditional_statement(Statement* statement) {
+    static u32 if_counter = 0;
+
+    Conditional* cond = &statement->conditional;
+    u32 number = if_counter++;
+
+    generate_expression(cond->condition);
+    emit("    cmp $0, %%rax");
+    emit("    je if.false.%d", number);
+    generate_statement(cond->true_body);
+    emit("    jmp if.end.%d", number);
+    
+    emit("if.false.%d:", number);
+    if (cond->false_body) {
+        generate_statement(cond->false_body);
+    }
+
+    emit("if.end.%d:", number);
+}
+
+static void generate_comment_statement(Statement* statement) {
+    String comment = statement->comment.token->name;
+    emit("\n    # %.*s", comment.size, comment.text);
+}
 
 static void generate_statement(Statement* statement) {
     switch (statement->kind) {
         case STATEMENT_COMPOUND : {
-            Compound* compound = &statement->compound;
-
-            ListNode* it;
-            list_iterate(it, &compound->statements) {
-                Statement* statement = list_to_struct(it, Statement, list_node);
-                generate_statement(statement);
-            }
+            generate_compound_statement(statement);
             break;
         }
         case STATEMENT_EXPRESSION : {
@@ -181,15 +322,19 @@ static void generate_statement(Statement* statement) {
             break;
         }
         case STATEMENT_RETURN : {
-            generate_expression(statement->return_statement.return_expression);
-            assert(function_decl);
-            String name = function_decl->name;
-            emit("    jmp end.%.*s\n", name.size, name.text);
+            generate_return_statement(statement);
+            break;
+        }
+        case STATEMENT_LOOP : {
+            generate_loop_statement(statement);
+            break;
+        }
+        case STATEMENT_CONDITIONAL : {
+            generate_conditional_statement(statement);
             break;
         }
         case STATEMENT_COMMENT : {
-            String comment = statement->comment.token->name;
-            emit("\n    # %.*s", comment.size, comment.text);
+            generate_comment_statement(statement);
             break;
         }
         default : {
@@ -236,12 +381,13 @@ static u32 compute_local_variable_offset(Function* function) {
 }
 
 static void generate_function(Declaration* declaration) {
-    function_decl = declaration;
+    current_function_declaration = declaration;
     Function* function = &declaration->function;
 
     u32 frame_size = compute_local_variable_offset(function);
     String name = declaration->name;
 
+    emit("");
     emit("    .text");
     emit("    .globl %.*s", name.size, name.text);
     emit("%.*s:", name.size, name.text);
@@ -249,6 +395,17 @@ static void generate_function(Declaration* declaration) {
     emit("    mov %%rsp, %%rbp");
     emit("    sub $%d, %%rsp", frame_size);
 
+    // Store the argument registers on the assigned place on the stack frame.
+    u32 reg = 0;
+    ListNode* it;
+    list_iterate(it, &function->function_scope->variables) {
+        if (reg >= 6) {
+            error_token(declaration->name_token, "this function uses more than 6 arguments");
+        }
+
+        Declaration* decl = list_to_struct(it, Declaration, list_node);
+        emit("    mov %%%s, %d(%%rbp)", argument_registers[reg++], decl->variable.offset);
+    }
 
     assert(function->body->kind == STATEMENT_COMPOUND);
     generate_statement(function->body);

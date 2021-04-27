@@ -8,16 +8,20 @@
 enum ExpressionKind {
     EXPRESSION_PRIMARY = 1,
     EXPRESSION_UNARY,
-    EXPRESSION_BINARY
+    EXPRESSION_BINARY,
+    EXPRESSION_CALL,
 };
 
 enum PrimaryKind {
     PRIMARY_NUMBER = 1,
     PRIMARY_IDENTIFIER,
+    PRIMARY_STRING,
     PRIMARY_KIND_COUNT
 };
 
 enum UnaryKind {
+    UNARY_DEREF = 1,
+    UNARY_ADDRESS_OF,
     UNARY_KIND_COUNT,
 };
 
@@ -40,6 +44,8 @@ enum StatementKind {
     STATEMENT_COMPOUND,
     STATEMENT_COMMENT,
     STATEMENT_RETURN,
+    STATEMENT_LOOP,
+    STATEMENT_CONDITIONAL,
     STATEMENT_KIND_COUNT
 };
 
@@ -67,6 +73,7 @@ struct Primary {
             Declaration* declaration;
         };
         u64 number;
+        String string;
     };
 };
 
@@ -83,15 +90,24 @@ struct Binary {
     Expression* right;
 };
 
+struct Call {
+    Token* token;
+    Expression* expression;
+
+    List arguments;   // Expressions.
+};
+
 struct Expression {
     union {
         Binary  binary;
         Unary   unary;
         Primary primary;
+        Call    call;
     };
 
     ExpressionKind kind;
     Type* type;
+    ListNode list_node; // Do we need this?
 };
 
 struct Compound {
@@ -107,12 +123,27 @@ struct ReturnStatement {
     Expression* return_expression;
 };
 
+struct Loop {
+    Statement* body;
+    Statement* post_statement;
+    Expression* condition;
+    Statement* init_statement;
+};
+
+struct Conditional {
+    Expression* condition;
+    Statement* true_body;
+    Statement* false_body;
+};
+
 struct Statement {
     union {
         Compound        compound;
         Comment         comment;
         Expression*     expression;
-        ReturnStatement return_statement;
+        ReturnStatement Return;
+        Loop            loop;
+        Conditional     conditional;
     };
 
     StatementKind kind;
@@ -157,7 +188,7 @@ struct Function {
 
 struct Declaration {
     union {
-        Variable variable;
+        Variable variable;  
         Function function;
     };
 
@@ -202,12 +233,18 @@ Scope* new_scope();
 Declaration* new_declaration();
 
 void* new_type(TypeKind kind);
-PointerType* new_pointer();
+void* new_pointer();
 
 void* new_statement(StatementKind kind);
 void* new_compound_statement();
 void* new_expression(ExpressionKind kind);
 void* new_binary(BinaryKind kind);
 void* new_primary(PrimaryKind kind);
+Call* new_call();
+Unary* new_unary(UnaryKind kind);
+
+
+bool is_deref(Expression* expression);
+bool is_variable(Expression* expression);
 
 #endif

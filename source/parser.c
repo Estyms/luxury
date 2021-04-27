@@ -13,15 +13,19 @@
 #include <error.h>
 #include <typer.h>
 
-static void push_declaration_on_scope(Declaration* declaration, Scope* scope);
-static void push_declaration_on_current_scope(Declaration* declaration, Parser* parser);
 static Expression* parse_expression(Parser* parser, s8 priority);
 static Expression* parse_unary_expression(Parser* parser);
 static Expression* parse_primary_expression(Parser* parser);
+static Expression* parse_suffix_expression(Parser* parser, Expression* previous);
 static Statement* parse_compound_statement(Parser* parser);
 static Statement* parse_expression_statement(Parser* parser);
 static Statement* parse_block(Parser* parser);
 static Statement* parse_compound_statement(Parser* parser);
+
+
+
+static void push_declaration_on_scope(Declaration* declaration, Scope* scope);
+static void push_declaration_on_current_scope(Declaration* declaration, Parser* parser);
 static Type* parse_type(Parser* parser);
 static void parse_function_argument(Parser* parser);
 static bool try_parse_declaration(Parser* parser, Statement** statement);
@@ -124,17 +128,83 @@ static Expression* parse_expression(Parser* parser, s8 priority) {
 
 static Expression* parse_unary_expression(Parser* parser) {
     Lexer* lexer = parser->lexer;
-    Token* token = current_token(lexer);
+    Token* token = consume_token(lexer);
 
     if (token->kind == TOKEN_OPEN_PARENTHESIS) {
-        skip_token(lexer, TOKEN_OPEN_PARENTHESIS);
+        // This is handeling all parenthesised sub-expressions.
         Expression* expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
         skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
-
-        return expression;
+        return parse_suffix_expression(parser, expression);
     }
+    else if (token->kind == TOKEN_MULTIPLICATION) {
+        // Address.
+        Unary* unary = new_unary(UNARY_ADDRESS_OF);
+        unary->operator = copy_token(token);
+        unary->operand  = parse_unary_expression(parser);
+
+        return (Expression *)unary;
+    }
+    else if (token->kind == TOKEN_AT) {
+        // Deref. 
+        Unary* unary = new_unary(UNARY_DEREF);
+        unary->operator = copy_token(token);
+        unary->operand  = parse_unary_expression(parser);
+
+        return (Expression *)unary;
+    }
+
+    undo_next_token(lexer);
     
-    return parse_primary_expression(parser);
+    Expression* primary = parse_primary_expression(parser);
+    return parse_suffix_expression(parser, primary);
+}
+
+static Expression* parse_suffix_expression(Parser* parser, Expression* previous) {
+    Lexer* lexer = parser->lexer;
+    Token* token = consume_token(lexer);
+
+    if (token->kind == TOKEN_OPEN_PARENTHESIS) {
+        // Function call expression.
+        Call* call = new_call();
+        call->expression = previous;
+        call->token = copy_token(token);
+
+        token = current_token(lexer);
+        while (token->kind != TOKEN_CLOSE_PARENTHESIS && token->kind != TOKEN_END_OF_FILE) {
+            Expression* new = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+            list_add_last(&new->list_node, &call->arguments);
+            
+            token = current_token(lexer);
+            if (token->kind == TOKEN_CLOSE_PARENTHESIS) {
+                break;
+            }
+
+            skip_token(lexer, TOKEN_COMMA);
+        }
+
+        skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
+        return parse_suffix_expression(parser, (Expression *)call);
+    }
+    else if (token->kind == TOKEN_OPEN_SQUARE) {
+        // Array expression. We convert this to an offsetted deref.
+        Unary* unary = new_expression(EXPRESSION_UNARY);
+        Binary* binary = new_binary(BINARY_PLUS);
+
+        binary->operator = copy_token(token);
+        binary->left     = previous;
+        binary->right    = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+
+        unary->kind     = UNARY_DEREF;
+        unary->operator = binary->operator;
+        unary->operand  = (Expression *)binary;
+
+        skip_token(lexer, TOKEN_CLOSE_SQUARE);
+
+        return parse_suffix_expression(parser, (Expression *)unary);
+    }
+
+    undo_next_token(lexer);
+    return previous;
 }
 
 static Expression* parse_primary_expression(Parser* parser) {
@@ -155,6 +225,11 @@ static Expression* parse_primary_expression(Parser* parser) {
             primary->name = primary->token->name;
             break;
         }
+        case TOKEN_STRING : {
+            primary->string = token->name;
+            primary->kind   = PRIMARY_STRING;
+            break;
+        }
         default : {
             error_token(token, "not a primary expression");
         }
@@ -169,6 +244,97 @@ static Statement* parse_expression_statement(Parser* parser) {
     statement->expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
     skip_token(parser->lexer, TOKEN_SEMICOLON);
     return statement;
+}
+
+static Statement* parse_if_statement(Parser* parser) {
+    Lexer* lexer = parser->lexer;
+    Token* token = next_token(lexer);
+
+    Conditional* cond = new_statement(STATEMENT_CONDITIONAL);
+
+    cond->condition = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+    cond->true_body = parse_compound_statement(parser);
+
+    token = current_token(lexer);
+    if (is_keyword(token, KEYWORD_ELSE)) {
+        token = next_token(lexer);
+
+        if (is_keyword(token, KEYWORD_IF)) {
+            cond->false_body = parse_if_statement(parser);
+        }
+        else {
+            cond->false_body = parse_compound_statement(parser);
+        }
+    }
+
+    return (Statement *)cond;
+}
+
+static Statement* parse_while_statement(Parser* parser) {
+
+}
+
+// for i in 0..5
+static Statement* parse_for_statement(Parser* parser) {
+    Lexer* lexer = parser->lexer;
+    Token* token = expect_token(lexer, TOKEN_IDENTIFIER);
+
+    Declaration* declaration = new_declaration();
+
+    declaration->kind       = DECLARATION_VARIABLE;
+    declaration->name_token = copy_token(token);
+    declaration->name       = token->name;
+    declaration->type       = new_type(TYPE_INFERRED);
+
+    Loop* loop = new_statement(STATEMENT_LOOP);
+
+    next_token(lexer);
+    skip_keyword(lexer, KEYWORD_IN);
+
+    Primary* name = new_primary(PRIMARY_IDENTIFIER);
+    name->name = declaration->name;
+    name->declaration = declaration;
+    
+    Binary* assign = new_binary(BINARY_ASSIGN);
+    //assign->operator = declaration->name_token;
+    assign->left     = (Expression *)name;
+    assign->right    = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+
+    Statement* expr_statement = new_statement(STATEMENT_EXPRESSION);
+    expr_statement->expression = (Expression *)assign;
+
+    skip_token(lexer, TOKEN_DOUBLE_DOT);
+
+    Binary* less_equal = new_binary(BINARY_LESS_EQUAL);
+    //less_equal->operator = declaration->name_token;
+    less_equal->left     = (Expression *)name;
+    less_equal->right    = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+
+    Primary* one = new_primary(PRIMARY_NUMBER);
+    //one->token  = declaration->name_token;
+    one->number = 1;
+
+    Binary* post = new_binary(BINARY_PLUS);
+    //post->operator = declaration->name_token;
+    post->left     = (Expression *)name;
+    post->right    = (Expression *)one;
+    
+    assign = new_binary(BINARY_ASSIGN);
+    //assign->operator = declaration->name_token;
+    assign->left     = (Expression *)name;
+    assign->right    = (Expression *)post;
+
+    Statement* post_statement = new_statement(STATEMENT_EXPRESSION);
+    post_statement->expression = (Expression *)assign;
+
+    loop->init_statement = expr_statement;
+    loop->condition      = (Expression *)less_equal;
+    loop->post_statement = post_statement;
+    loop->body           = parse_compound_statement(parser);
+
+    push_declaration_on_scope(declaration, loop->body->compound.scope);
+
+    return (Statement *)loop;
 }
 
 static Statement* parse_statement(Parser* parser) {
@@ -193,6 +359,12 @@ static Statement* parse_statement(Parser* parser) {
 
         skip_token(lexer, TOKEN_SEMICOLON);
         return (Statement *)Return;
+    }
+    else if (is_keyword(token, KEYWORD_FOR)) {
+        return parse_for_statement(parser);
+    }
+    else if (is_keyword(token, KEYWORD_IF)) {
+        return parse_if_statement(parser);
     }
 
     return parse_expression_statement(parser);
@@ -258,14 +430,17 @@ static Type* parse_type(Parser* parser) {
             error_token(token, "cannot evaluate non-constant expressions currently");
         }
 
-        PointerType* pointer = new_pointer();
-        pointer->count = token->number;
+        Type* type = new_pointer();
+        type->pointer.count = token->number;
 
         skip_token(lexer, TOKEN_NUMBER);
         skip_token(lexer, TOKEN_CLOSE_SQUARE);
 
-        pointer->pointer_to = parse_type(parser);
-        return (Type *)pointer;
+        type->pointer.pointer_to = parse_type(parser);
+
+
+        type->size = type->pointer.count * type->pointer.pointer_to->size;
+        return type;
     }
     else if (token->kind == TOKEN_IDENTIFIER) {
         // The identifier may have a valid reference in the code. We mark it as unknown at this 
@@ -404,6 +579,7 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
 
         statement->expression = (Expression *)assign;
 
+
         // Return the assign expression from the function.
         *init_statement = statement;
     }
@@ -431,6 +607,36 @@ static void exit_scope(Parser* parser) {
     parser->current_scope = parser->current_scope->parent;
 }
 
+static Declaration* does_declaration_exist(Declaration* declaration, Scope* scope) {
+    assert(declaration && scope);
+
+    List* list = 0;
+    if (declaration->kind == DECLARATION_VARIABLE) {
+        list = &scope->variables;
+    }
+    else if (declaration->kind == DECLARATION_FUNCTION) {
+        list = &scope->functions;
+    }
+    else if (declaration->kind == DECLARATION_TYPE) {
+        list = &scope->types;
+    }
+
+    ListNode* it;
+    list_iterate(it, list) {
+        Declaration* new_decl = list_to_struct(it, Declaration, list_node);
+
+        if (string_compare(&declaration->name, &new_decl->name)) {
+            return new_decl;
+        }
+    }
+
+    if (scope->parent) {
+        return does_declaration_exist(declaration, scope->parent);
+    }
+
+    return 0;
+}
+
 static void push_declaration_on_scope(Declaration* declaration, Scope* scope) {
     assert(declaration && scope);
 
@@ -448,6 +654,10 @@ static void push_declaration_on_scope(Declaration* declaration, Scope* scope) {
     if (list == 0) {
         printf("Parser (push_declraration) : declaration type not handled\n");
         exit(1);
+    }
+
+    if (does_declaration_exist(declaration, scope)) {
+        error_token(declaration->name_token, "declraration is existing");
     }
 
     list_add_last(&declaration->list_node, list);

@@ -13,6 +13,7 @@ enum TokenKind {
     TOKEN_END_OF_FILE,
     
     TOKEN_NUMBER,
+    TOKEN_STRING,
     TOKEN_IDENTIFIER,
     TOKEN_COMMENT,
     
@@ -27,6 +28,7 @@ enum TokenKind {
     TOKEN_GREATER,           // > 
     TOKEN_GREATER_EQUAL,     // >=
     TOKEN_ASSIGN,            // =
+    TOKEN_NOT_EQUAL,         // !=
 
     TOKEN_OPEN_PARENTHESIS,  // (
     TOKEN_CLOSE_PARENTHESIS, // )
@@ -35,11 +37,17 @@ enum TokenKind {
     TOKEN_OPEN_SQUARE,       // [
     TOKEN_CLOSE_SQUARE,      // ]
 
+    TOKEN_DOT,               // .
+    TOKEN_DOUBLE_DOT,        // ..
     TOKEN_SEMICOLON,         // ;
     TOKEN_COLON,             // :
     TOKEN_DOUBLE_COLON,      // ::
     TOKEN_ARROW,             // ->
     TOKEN_COMMA,             // ,
+
+    TOKEN_BITWISE_XOR,       // ^
+    TOKEN_BITWISE_AND,       // &
+    TOKEN_AT,                // @
 
     TOKEN_KIND_COUNT
 };
@@ -56,26 +64,27 @@ enum KeywordKind {
     KEYWORD_S8,
     KEYWORD_CHAR,
     KEYWORD_RETURN,
+    KEYWORD_FOR,
+    KEYWORD_WHILE,
+    KEYWORD_IF,
+    KEYWORD_ELSE,
+    KEYWORD_IN,
 
     KEYWORD_KIND_COUNT
 };
 
 struct Token {
     TokenKind kind;
-    String name;
 
-    // The reason for this is that we get the start location of the source file in case we sometimes
-    // need to backtrack.
     Lexer* lexer;
-
-    u32 line;
-    u32 column;
+    String name;
+    u32    line;
+    u32    column;
 
     u64 number;
 };
 
 struct Lexer {
-    // Must be terminated with a zero.
     String file;
     String file_name;
 
@@ -95,16 +104,33 @@ struct Lexer {
 
 Lexer* new_lexer(String* file, String* file_name);
 
+// Just returns the next token.
 Token* next_token(Lexer* lexer);
+
+// Returns the token 'count' ahead, but does not move the cursor.
 Token* peek_token(Lexer* lexer, u32 count);
+
+// Moves the cursor one step back.
 Token* undo_next_token(Lexer* lexer);
+
+// Returns the next token, but does not move the cursor.
 Token* peek_next(Lexer* lexer);
+
+// Returns the current token.
 Token* current_token(Lexer* lexer);
+
+// Returns the current token, and moves the cursor to the next token.
 Token* consume_token(Lexer* lexer);
+
+// Returns the next token if it matches the 'kind', otherwise it signals an error.
 Token* expect_token(Lexer* lexer, TokenKind kind);
+
+// Returns next token if the current token matches the 'kind', otherwise it signals an error.
 Token* skip_token(Lexer* lexer, TokenKind kind);
 
-
 bool is_keyword(Token* token, KeywordKind kind);
+
+// Return the next toke if the current token is the given keyword, otherwise it signals an error.
+Token* skip_keyword(Lexer* lexer, KeywordKind kind);
 
 #endif

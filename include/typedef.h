@@ -36,5 +36,8 @@ typedef struct Variable Variable;
 typedef struct UnknownType UnknownType;
 typedef struct ReturnStatement ReturnStatement;
 typedef struct Typer Typer;
+typedef struct Call Call;
+typedef struct Loop Loop;
+typedef struct Conditional Conditional;
 
 #endif

@@ -65,11 +65,32 @@ void* new_type(TypeKind kind) {
     return type;
 }
 
-PointerType* new_pointer() {
+void* new_pointer() {
     Type* type = new_type(TYPE_POINTER);
 
     type->size      = 8;
     type->alignment = 8;
 
     return (void *)type;
+}
+
+Call* new_call() {
+    Call* call = new_expression(EXPRESSION_CALL);
+    list_init(&call->arguments);
+    return call;
+}
+
+Unary* new_unary(UnaryKind kind) {
+    Unary* unary = new_expression(EXPRESSION_UNARY);
+    unary->kind = kind;
+    return unary;
+}
+
+
+bool is_deref(Expression* expression) {
+    return expression->kind == EXPRESSION_UNARY && expression->unary.kind == UNARY_DEREF;
+}
+
+bool is_variable(Expression* expression) {
+    return expression->kind == EXPRESSION_PRIMARY && expression->primary.kind == PRIMARY_IDENTIFIER;
 }

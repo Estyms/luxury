@@ -1,5 +1,5 @@
-#ifndef ERR_H
-#define ERR_H
+#ifndef ERROR_H
+#define ERROR_H
 
 #include <types.h>
 #include <lexer.h>
