@@ -231,6 +231,10 @@ static void type_primary_expression(Expression* expression, Typer* typer) {
 }
 
 static void type_call_expression(Expression* expression, Typer* typer) {
+    if (expression->type) {
+        return;
+    }
+
     Call* call = &expression->call;
 
     ListNode* it;
@@ -378,7 +382,7 @@ static void type_loop_statement(Statement* statement, Typer* typer) {
     if (loop->post_statement) {
         type_statement(loop->post_statement, typer);
     }
-    
+
     exit_scope(typer);
 
     type_statement(loop->body, typer);
@@ -421,9 +425,13 @@ static void type_function(Declaration* decl, Typer* typer) {
 
     type_scope(function->function_scope, typer);
     enter_scope(typer, function->function_scope);
-    assert(function->body->compound.scope != function->function_scope);
-    type_scope(function->body->compound.scope, typer);
-    type_statement(function->body, typer);
+
+    if (function->assembly_function == false) {
+        assert(function->body->compound.scope != function->function_scope);
+        type_scope(function->body->compound.scope, typer);
+        type_statement(function->body, typer);
+    }
+
     exit_scope(typer);
 }
 
@@ -612,6 +620,10 @@ static void type_scope(Scope* scope, Typer* typer) {
     list_iterate(it, &scope->functions) {
         Declaration* decl = list_to_struct(it, Declaration, list_node);
         assert(decl->kind == DECLARATION_FUNCTION);
+
+        if (decl->function.return_type == 0) {
+            decl->function.return_type = new_type(TYPE_VOID);
+        }
 
         type_function(decl, typer);
     }

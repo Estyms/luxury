@@ -13,6 +13,8 @@ void read_source_file(String* string, char* file_name) {
     if (!file) {
         exit(1);
     }
+
+    printf("size of file is : %ld\n", sizeof(File));
     
     fseek(file, 0, SEEK_END);
     u32 file_size = ftell(file);
@@ -57,6 +59,8 @@ int main(int argument_count, char** arguments) {
     // Build the syntax tree.
     Program* program = parser_program(parser);
     print_program(program);
+
+    printf("Typing starting\n");
 
     // Type the syntax tree.
     type_program(program, &typer);

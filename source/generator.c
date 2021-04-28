@@ -10,7 +10,10 @@
 static void generate_statement(Statement* statement);
 static void generate_expression(Expression* expression);
 
-const char* argument_registers[] = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
+const char* argument_registers1[] = { "dil", "sil", "dl" , "cl" , "r8b", "r9b" };
+const char* argument_registers2[] = { "di" , "si" , "dx" , "cx" , "r8w", "r9w" };
+const char* argument_registers4[] = { "edi", "esi", "edx", "ecx", "r8d", "r9d" };
+const char* argument_registers8[] = { "rdi", "rsi", "rdx", "rcx", "r8",  "r9"  };
 
 File* file;
 u32 stack_level = 0;
@@ -90,6 +93,15 @@ static void generate_address(Expression* expression) {
     }
 }
 
+static bool type_is_signed(Type* type) {
+    switch (type->kind) {
+        case TYPE_POINTER: return false;
+        case TYPE_BASIC:   return type->basic.is_signed;
+    }
+
+    assert(0);
+}
+
 static void load_from_rax(Type* type) {
     assert(type);
 
@@ -97,20 +109,21 @@ static void load_from_rax(Type* type) {
         return;
     }
 
+    char c = (type_is_signed(type)) ? 's' : 'z';
     switch (type->size) {
-        case 1 : emit("    movsbq (%%rax), %%rax"); break;
-        case 2 : emit("    movswq   (%%rax), %%rax"); break;
-        case 4 : emit("    movslq   (%%rax), %%rax"); break;
-        case 8 : emit("    movq   (%%rax), %%rax"); break;
+        case 1 : emit("    mov%cbq (%%rax), %%rax", c); break;
+        case 2 : emit("    mov%cwq (%%rax), %%rax", c); break;
+        case 4 : emit("    mov%clq (%%rax), %%rax", c); break;
+        case 8 : emit("    mov (%%rax), %%rax");        break;
     }
 }
 
-static void store_to_rax_address(Type* type) {
+static void store_to_rdi(Type* type) {
     switch (type->size) {
-        case 1 : emit("    movb %%dil, (%%rax)"); break;
-        case 2 : emit("    movw %%di, (%%rax)"); break;
-        case 4 : emit("    movl %%edi, (%%rax)"); break;
-        case 8 : emit("    movq %%rdi, (%%rax)"); break;
+        case 1 : emit("    mov %%al,  (%%rdi)"); break;
+        case 2 : emit("    mov %%ax,  (%%rdi)"); break;
+        case 4 : emit("    mov %%eax, (%%rdi)"); break;
+        case 8 : emit("    mov %%rax, (%%rdi)"); break;
     }
 }
 
@@ -121,12 +134,12 @@ static void generate_binary_expression(Expression* expression) {
     assert(binary->left);
 
     if (binary->kind == BINARY_ASSIGN) {
-        generate_expression(binary->right);
+        generate_address(binary->left);
         push_rax();
         
-        generate_address(binary->left);
+        generate_expression(binary->right);
         pop_rdi();
-        store_to_rax_address(expression->type);
+        store_to_rdi(expression->type);
         return;
     }
 
@@ -188,9 +201,15 @@ static void generate_binary_expression(Expression* expression) {
             emit("    movzb %%al, %%eax");
             break;
         }
+
+        case BINARY_NOT_EQUAL : {
+            emit("    cmp %%rdi, %%rax");
+            emit("    setne %%al");
+            emit("    movzb %%al, %%eax");
+            break;
+        }
         default : {
-            printf("error\n");
-            exit(1);
+            assert(0);
         }
     }
 }
@@ -256,7 +275,7 @@ static void generate_call_expression(Expression* expression) {
     }
 
     while(argument_count--) {
-        pop(argument_registers[argument_count]);
+        pop(argument_registers8[argument_count]);
     }
 
     emit("    mov $0, %%rax");
@@ -441,14 +460,24 @@ static u32 compute_local_variable_offset(Function* function) {
 static void generate_function(Declaration* declaration) {
     current_function_declaration = declaration;
     Function* function = &declaration->function;
+    String name = declaration->name;
+
+    if (function->assembly_function) {
+        emit("");
+        emit("    .text");
+        emit("    .globl %.*s", name.size, name.text);
+        emit("%.*s:", name.size, name.text);
+        emit("    %.*s", function->assembly_body.size, function->assembly_body.text);
+        return;
+    }
 
     u32 frame_size = compute_local_variable_offset(function);
-    String name = declaration->name;
 
     emit("");
     emit("    .text");
     emit("    .globl %.*s", name.size, name.text);
     emit("%.*s:", name.size, name.text);
+
     emit("    push %%rbp");
     emit("    mov %%rsp, %%rbp");
     emit("    sub $%d, %%rsp", frame_size);
@@ -462,7 +491,19 @@ static void generate_function(Declaration* declaration) {
         }
 
         Declaration* decl = list_to_struct(it, Declaration, list_node);
-        emit("    mov %%%s, %d(%%rbp)", argument_registers[reg++], decl->variable.offset);
+
+        if (decl->type->size == 1) {
+            emit("    mov %%%s, %d(%%rbp)", argument_registers1[reg++], decl->variable.offset);
+        }
+        else if (decl->type->size == 2) {
+            emit("    mov %%%s, %d(%%rbp)", argument_registers2[reg++], decl->variable.offset);
+        }
+        else if (decl->type->size == 4) {
+            emit("    mov %%%s, %d(%%rbp)", argument_registers4[reg++], decl->variable.offset);
+        }
+        else if (decl->type->size == 8) {
+            emit("    mov %%%s, %d(%%rbp)", argument_registers8[reg++], decl->variable.offset);
+        }
     }
 
     assert(function->body->kind == STATEMENT_COMPOUND);

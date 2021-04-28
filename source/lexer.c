@@ -37,10 +37,12 @@ static const char* token_kind[] = {
     "^"
     "&",
     "@"
+    "%%"
 };
 
 static const char* keywords[] = {
     "func",
+    "asm",
     "u64",
     "u32",
     "u16",
@@ -250,6 +252,14 @@ static void parse_puctuation(Lexer* lexer, Token* token) {
         }
         case '@' : {
             skip_punctuation(lexer, 1, token, TOKEN_AT);
+            break;
+        }
+        case '%' : {
+            skip_punctuation(lexer, 1, token, TOKEN_MODULO);
+            break;
+        }
+        case '$' : {
+            skip_punctuation(lexer, 1, token, TOKEN_DOLLAR);
             break;
         }
     }

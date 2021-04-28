@@ -32,6 +32,7 @@ enum BinaryKind {
     BINARY_MULTIPLICATION,
     BINARY_DIVISION,
     BINARY_EQUAL,
+    BINARY_NOT_EQUAL,
     BINARY_LESS,
     BINARY_LESS_EQUAL,
     BINARY_GREATER,
@@ -56,6 +57,7 @@ enum TypeKind {
     TYPE_INFERRED,
     TYPE_UNKNOWN,
     TYPE_STRUCT,
+    TYPE_VOID,
     TYPE_KIND_COUNT
 };
 
@@ -221,8 +223,12 @@ struct Variable {
 
 struct Function {
     Type* return_type;
+    
     Statement* body;
+    String assembly_body;
+
     Scope* function_scope;
+    bool assembly_function;
 };
 
 struct Declaration {

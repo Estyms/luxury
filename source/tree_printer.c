@@ -82,7 +82,7 @@ static const char* unary_kind[] = {
 };
 
 static const char* binary_kind[] = {
-    "none", "+", "-", "*", "/", "==", "<", "<=", ">", ">=", "="
+    "none", "+", "-", "*", "/", "==", "!=", "<", "<=", ">", ">=", "="
 };
 
 static void print_expression(Expression* expression) {
@@ -182,6 +182,22 @@ static void print_expression(Expression* expression) {
     }    
 }
 
+static void print_asm_body(String* string) {
+    indented_print(" > ");
+
+    for (u32 i = 0; i < string->size; i++) {
+        char c = string->text[i];
+
+        if (c == '\n') {
+            printf("\n");
+            indented_print(" > ");
+            continue;
+        }
+
+        printf("%c", c);
+    }
+}
+
 static void print_function(Declaration* decl) {
     Function* function = &decl->function;
 
@@ -196,7 +212,13 @@ static void print_function(Declaration* decl) {
     print_scope(function->function_scope);
     indentation--;
     mask[function_indent] = false;
-    print_statement(function->body);
+
+    if (function->assembly_function) {
+        print_asm_body(&function->assembly_body);
+    }
+    else {
+        print_statement(function->body);
+    }
     
     indentation--;
 }

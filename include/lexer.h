@@ -48,12 +48,15 @@ enum TokenKind {
     TOKEN_BITWISE_XOR,       // ^
     TOKEN_BITWISE_AND,       // &
     TOKEN_AT,                // @
+    TOKEN_MODULO,            // %
+    TOKEN_DOLLAR,            // $
 
     TOKEN_KIND_COUNT
 };
 
 enum KeywordKind {
     KEYWORD_FUNC,
+    KEYWORD_ASM,
     KEYWORD_U64,
     KEYWORD_U32,
     KEYWORD_U16,

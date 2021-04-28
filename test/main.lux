@@ -1,15 +1,43 @@
-
-Number :: struct {
-    number : u64;
+File :: struct {
+    dummy: [216] u8;
 }
 
-print_number : func (pointer : * Number) {
-    printf("Number is : %d\n", pointer.number);
+
+read_file : func (name: * char, buffer: **char) {
+    file : * File;
+
+    fseek(file, 0, 2);
+    file_size : u32 ;
+    
+    
+    fseek(file, 0, 0);  
+}
+
+
+syscall_print : asm (text: * char, size : u64) -> u32 {
+    mov %rsi, %rdx
+    mov $1, %rax
+    mov $1, %rbx
+    mov %rdi, %rsi
+    mov $0, %rdi
+    syscall
+    ret
+}
+
+print : func (out text: * char, data: u32)
+
+print : func (text: * char) {
+    size := 0;
+    pointer := text;
+
+    while @pointer {
+        pointer = pointer + 1;
+        size = size + 1;
+    }
+
+    syscall_print(text, size);
 }
 
 main : func (argument_count: u64, arguments: **char) {
-    for i in 0..argument_count - 1 {
-        printf("Argument : %s\n", arguments[i]);
-    }
-
+    print("this is cool\n");
 }

@@ -57,6 +57,7 @@ static Token* copy_token(Token* token) {
 static BinaryKind token_to_binary_kind(Token* token) {
     switch (token->kind) {
         case TOKEN_EQUAL          : return BINARY_EQUAL;
+        case TOKEN_NOT_EQUAL      : return BINARY_NOT_EQUAL;
         case TOKEN_GREATER        : return BINARY_GREATER;
         case TOKEN_GREATER_EQUAL  : return BINARY_GREATER_EQUAL;
         case TOKEN_LESS           : return BINARY_LESS;
@@ -85,6 +86,7 @@ static s8 get_binary_precedence(Token* token) {
         case TOKEN_GREATER_EQUAL:
             return 20;
         case TOKEN_EQUAL:
+        case TOKEN_NOT_EQUAL:
             return 19;
         case TOKEN_ASSIGN:
             return 1;
@@ -632,7 +634,7 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
     token = next_token(lexer);   // Skip the declaration name.
     token = next_token(lexer);   // Skip the :: or :
 
-    if (is_keyword(token, KEYWORD_FUNC) && !is_typedef) {
+    if ((is_keyword(token, KEYWORD_FUNC) || is_keyword(token, KEYWORD_ASM)) && !is_typedef) {
         declaration->kind = DECLARATION_FUNCTION;
     
         // Each function contains at least two scopes. The first scope is opened here, and will 
@@ -642,6 +644,7 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
 
         Function* function = &declaration->function;
         function->function_scope = scope;
+        function->assembly_function = is_keyword(token, KEYWORD_ASM);
 
         token = next_token(lexer);  // Skip the function keyword.
         token = skip_token(lexer, TOKEN_OPEN_PARENTHESIS);
@@ -666,7 +669,21 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
             function->return_type = parse_type(parser);
         }
 
-        function->body = parse_compound_statement(parser);
+        if (function->assembly_function) {
+            token = skip_token(lexer, TOKEN_OPEN_CURLY);
+
+            function->assembly_body = current_token(lexer)->name;
+
+            while (token->kind != TOKEN_CLOSE_CURLY && token->kind != TOKEN_END_OF_FILE) {
+                token = next_token(lexer);
+            }
+
+            function->assembly_body.size = token->name.text - function->assembly_body.text;
+            skip_token(lexer, TOKEN_CLOSE_CURLY);
+        }
+        else {
+            function->body = parse_compound_statement(parser);
+        }
         exit_scope(parser);
 
         push_declaration_on_current_scope(declaration, parser);
