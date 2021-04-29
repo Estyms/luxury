@@ -183,9 +183,12 @@ static void print_expression(Expression* expression) {
 }
 
 static void print_asm_body(String* string) {
-    indented_print(" > ");
+    indented_print(" Assembly:\n");
+    indentation++;
+    mask[indentation] = true;
 
-    for (u32 i = 0; i < string->size; i++) {
+    indented_print(" > ");
+    for (u32 i = 0; i < string->size-1; i++) {
         char c = string->text[i];
 
         if (c == '\n') {
@@ -196,6 +199,9 @@ static void print_asm_body(String* string) {
 
         printf("%c", c);
     }
+    mask[indentation] = false;
+    indentation--;
+    printf("\n");
 }
 
 static void print_function(Declaration* decl) {
