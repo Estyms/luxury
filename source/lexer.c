@@ -98,7 +98,7 @@ static bool is_valid_letter(char c) {
 static char advance_lexer(Lexer* lexer) {
     char c = lexer->cursor[0];
     if (c == 0) {
-        return;
+        return '\0';
     }
 
     lexer->cursor++;
