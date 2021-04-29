@@ -583,38 +583,41 @@ static Type* resolve_type(Type* type, Typer* typer) {
     return type;
 }
 
+static void resolve_declraration_type(Declaration* declaration, Typer* typer) {
+    // We are using one global variable to determine if there are any unresolved types still.
+    // We save that variable (restore it after), to check if the entire structure is still
+    // untyped.
+    bool saved_unresolved = typer->unresolved_types;
+    typer->unresolved_types = false;
+
+    if (declaration->type->kind != TYPE_STRUCT || declaration->type->Struct.scope->typing_complete == false) {
+        declaration->type = resolve_type(declaration->type, typer);
+
+        if (declaration->type->kind == TYPE_STRUCT) {
+            declaration->type->Struct.scope->typing_complete = !typer->unresolved_types;
+
+            if (declaration->type->Struct.scope->typing_complete) {
+                compute_struct_offsets(declaration->type);
+                fix_struct_offsets(declaration->type, 0);
+            }
+        }
+    }
+
+    typer->unresolved_types = typer->unresolved_types || saved_unresolved;
+}
+
 static void type_scope(Scope* scope, Typer* typer) {
     enter_scope(typer, scope);
 
     ListNode* it;
     list_iterate(it, &scope->types) {
-        Declaration* decl = list_to_struct(it, Declaration, list_node);
-
-        // We are using one global variable to determine if there are any unresolved types still.
-        // We save that variable (restore it after), to check if the entire structure is still
-        // untyped.
-        bool saved_unresolved = typer->unresolved_types;
-        typer->unresolved_types = false;
-
-        if (decl->type->kind != TYPE_STRUCT || decl->type->Struct.scope->typing_complete == false) {
-            decl->type = resolve_type(decl->type, typer);
-
-            if (decl->type->kind == TYPE_STRUCT) {
-                decl->type->Struct.scope->typing_complete = !typer->unresolved_types;
-
-                if (decl->type->Struct.scope->typing_complete) {
-                    compute_struct_offsets(decl->type);
-                    fix_struct_offsets(decl->type, 0);
-                }
-            }
-        }
-
-        typer->unresolved_types = typer->unresolved_types || saved_unresolved;
+        Declaration* declaration = list_to_struct(it, Declaration, list_node);
+        resolve_declraration_type(declaration, typer);        
     }
 
     list_iterate(it, &scope->variables) {        
-        Declaration* decl = list_to_struct(it, Declaration, list_node);
-        decl->type = resolve_type(decl->type, typer);
+        Declaration* declaration = list_to_struct(it, Declaration, list_node);
+        resolve_declraration_type(declaration, typer);
     }
 
     list_iterate(it, &scope->functions) {

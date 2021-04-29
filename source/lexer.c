@@ -1,3 +1,13 @@
+// Copyright (C) strawberryhacker.
+//
+// This file is responsible for breaking up the program into smaller chunks, called tokens. This 
+// will handle comments, identifiers, numbers, strings, chars and punctuation. Every token will
+// get a token kind, which is a numerical value, such that we quickly can compare the token in the
+// parser. If the token is a number we also assign the number value to the token.
+//
+// The lexer does not tokenize the entire file first. Instead the parser will instruct the lexer
+// to parse tokens on-the-fly. Parsing and lexing is really just the same step.
+
 #include <lexer.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -274,7 +284,7 @@ static s8 char_to_number(char c) {
     c |= (1 << 5);
 
     if ('a' <= c && c <= 'f') {
-        return c - 'a';
+        return c - 'a' + 10;
     }
 
     return -1;
@@ -349,6 +359,8 @@ static void parse_comment(Lexer* lexer, Token* token) {
 
     token->name.text = lexer->cursor;
 
+    //( multi-line comment //)
+    // single-line comment
     if (lexer->cursor[0] == '(') {
         u32 nesting_level = 1;
        

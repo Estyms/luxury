@@ -1,13 +1,13 @@
 #include <array.h>
 #include <stdlib.h>
 
-const u32 initial_size = 1024;
+const u32 INITIAL_SIZE = 1024;
 
 Array* new_array() {
     Array* array = malloc(sizeof(Array));
 
-    array->buffer = malloc(initial_size);
-    array->capacity = initial_size;
+    array->buffer = malloc(INITIAL_SIZE);
+    array->capacity = INITIAL_SIZE;
     array->size = 0;
 
     return array;

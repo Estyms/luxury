@@ -10,6 +10,7 @@
 static void generate_statement(Statement* statement);
 static void generate_expression(Expression* expression);
 
+// Function arguments will be placed in these registers according to the SystemV ABI.
 const char* argument_registers1[] = { "dil", "sil", "dl" , "cl" , "r8b", "r9b" };
 const char* argument_registers2[] = { "di" , "si" , "dx" , "cx" , "r8w", "r9w" };
 const char* argument_registers4[] = { "edi", "esi", "edx", "ecx", "r8d", "r9d" };
@@ -113,7 +114,7 @@ static void load_from_rax(Type* type) {
     switch (type->size) {
         case 1 : emit("    mov%cbq (%%rax), %%rax", c); break;
         case 2 : emit("    mov%cwq (%%rax), %%rax", c); break;
-        case 4 : emit("    mov%clq (%%rax), %%rax", c); break;
+        case 4 : emit("    movsxd (%%rax), %%rax", c); break;
         case 8 : emit("    mov (%%rax), %%rax");        break;
     }
 }

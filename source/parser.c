@@ -1,10 +1,21 @@
-// This file will contain the language parser which is transforming the token stream from the lexer
-// into a graph representation. The tree nodes are listed in the tree.h header file. The expression
-// node and the statement node are the core components in the tree and are used in many other nodes 
-// as well; for example the return statement contains a pointer to the return expression. 
-// Declarations and acctual statments are completely separated. This is because declarations does 
-// not have any function in the code. Declarations are placed on the scope, and will contain a 
-// mapping between a name and a type, used in later passes in the type checking phase.
+// Copyright (C) strawberryhacker.
+// 
+// This file contains the language parser which transforms the token stream from the lexer into a
+// graph representation which resebles the original program.
+//
+// The most important tree nodes are stataments and expression. Expressions evaluates to some kind 
+// of value, whereas statements do not. Statements also covers bigger synactical constructs such as 
+// loops and if statements.
+// 
+// Expressions / statements, and declarations are completely separated. A declaration is something
+// that maps a name to a type. Examples are variable and function declaration and typedefs. 
+// Declarations does not have any thing to do with the actual code, beside being information for 
+// the compiler. Therefore it is not a part of the syntax tree. Instead it is placed on the scope.
+//
+// A scope is a structure which keeps track of all the declarations within a code-block (curly 
+// braces). Each scope has a pointer to the parent, used when we are looking up a declaration that 
+// is not in the current scope. It also contains a list of all the sub-scopes, used for iterating
+// over all declarations in a function, needed for the stack frame allocation.
 
 #include <parser.h>
 #include <stdlib.h>
@@ -34,13 +45,8 @@ static void exit_scope(Parser* parser);
 // All initial calls to parse_expression must use this initial priority.
 static const s8 EXPRESSION_INIT_PRIORITY = -1;
 
-// Todo: remove this.
-static void print_token(Token* token) {
-    printf("%.*s\n", token->name.size, token->name.text);
-}
-
-// Since the lexer is not allocating any memory for the tokens except for the initial fixed size 
-// token buffer, we need to manually copy any tokens we want to store.
+// Since the lexer is not allocating any memory for the tokens (except for the initial fixed size 
+// token buffer), we need to manually copy all tokens we want to store.
 static Token* copy_token(Token* token) {
     Token* new_token = calloc(1, sizeof(Token));
 
@@ -96,19 +102,25 @@ static s8 get_binary_precedence(Token* token) {
     return 0;
 }
 
-// We are using a recursive expression parser which tracks the running priority of the binary 
-// operator. Each call will parse a unary expression (left expression) and then check the next 
-// binary priority. If the priority rises we recursivly call parse_expression (right expression),
-// and construct a new node. Once done we treat this new binary node as the left expression, and
-// continue to loop. If the priority does not rise, we stop recursing.
+// For parsing all expressions we are using a recursive parser which tracks the running priority of
+// the binary operator. Each call will parse a unary expression (left hand side) and then check the 
+// next binary priority. If the priority rises we recursivly call parse_expression (which will 
+// become the right hand side).
+// 
+// When the recursive call returns, we have the original left hand side expression (parse_unary) and
+// a new right hand side expression (parse_expression). We make a new binary node from these 
+// expressions, and treat this as the left hand side expression, and check the next priority.
+//
+// This way the operator precedence determines in which direction we build the tree. If the tree 
+// grows down the left leg (operator rises), or if it grows down the right leg (operator falls).
 static Expression* parse_expression(Parser* parser, s8 priority) {
     assert(parser);
     Lexer* lexer = parser->lexer;
-    
     Expression* left = parse_unary_expression(parser);
 
     while (1) {
         Token* token = current_token(lexer);
+
         s8 new_priority = get_binary_precedence(token);
         
         // The zero check termiates the recursion if the expression ends.
@@ -122,7 +134,7 @@ static Expression* parse_expression(Parser* parser, s8 priority) {
         binary->left     = left;
         binary->right    = parse_expression(parser, new_priority);
 
-        // Treat the binary expression as the left expression.
+        // Treat the binary expression as the left hand side.
         left = (Expression *)binary;
     }
 }
@@ -132,22 +144,27 @@ static Expression* parse_unary_expression(Parser* parser) {
     Token* token = consume_token(lexer);
 
     if (token->kind == TOKEN_OPEN_PARENTHESIS) {
-        // This is handeling all parenthesised sub-expressions.
+        // Parenthesised expression.
         Expression* expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
         skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
+
+        // We might still have a suffix expression following a parenthesized expression e.g.
+        // (data + 2)[4] should work assuming data is a pointer.
         return parse_suffix_expression(parser, expression);
     }
     else if (token->kind == TOKEN_MULTIPLICATION) {
-        // Address.
+        // Address of.
         Unary* unary = new_unary(UNARY_ADDRESS_OF);
+
         unary->operator = copy_token(token);
         unary->operand  = parse_unary_expression(parser);
 
         return (Expression *)unary;
     }
     else if (token->kind == TOKEN_AT) {
-        // Deref. 
+        // Dereference.
         Unary* unary = new_unary(UNARY_DEREF);
+
         unary->operator = copy_token(token);
         unary->operand  = parse_unary_expression(parser);
 
@@ -160,69 +177,12 @@ static Expression* parse_unary_expression(Parser* parser) {
     return parse_suffix_expression(parser, primary);
 }
 
-static Expression* parse_suffix_expression(Parser* parser, Expression* previous) {
-    Lexer* lexer = parser->lexer;
-    Token* token = consume_token(lexer);
-
-    if (token->kind == TOKEN_OPEN_PARENTHESIS) {
-        // Function call expression.
-        Call* call = new_call();
-        call->expression = previous;
-        call->token = copy_token(token);
-
-        token = current_token(lexer);
-        while (token->kind != TOKEN_CLOSE_PARENTHESIS && token->kind != TOKEN_END_OF_FILE) {
-            Expression* new = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
-            list_add_last(&new->list_node, &call->arguments);
-            
-            token = current_token(lexer);
-            if (token->kind == TOKEN_CLOSE_PARENTHESIS) {
-                break;
-            }
-
-            skip_token(lexer, TOKEN_COMMA);
-        }
-
-        skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
-        return parse_suffix_expression(parser, (Expression *)call);
-    }
-    else if (token->kind == TOKEN_OPEN_SQUARE) {
-        // Array expression. We convert this to an offsetted deref.
-        Unary* unary = new_expression(EXPRESSION_UNARY);
-        Binary* binary = new_binary(BINARY_PLUS);
-
-        binary->operator = copy_token(token);
-        binary->left     = previous;
-        binary->right    = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
-
-        unary->kind     = UNARY_DEREF;
-        unary->operator = binary->operator;
-        unary->operand  = (Expression *)binary;
-
-        skip_token(lexer, TOKEN_CLOSE_SQUARE);
-
-        return parse_suffix_expression(parser, (Expression *)unary);
-    }
-    else if (token->kind == TOKEN_DOT) {
-        Dot* dot = new_expression(EXPRESSION_DOT);
-
-        dot->dot_token  = copy_token(token);
-        dot->member     = copy_token(current_token(lexer));
-        skip_token(lexer, TOKEN_IDENTIFIER);
-        dot->expression = previous;
-        
-        return parse_suffix_expression(parser, (Expression *)dot);
-    }
-
-    undo_next_token(lexer);
-    return previous;
-}
-
 static Expression* parse_primary_expression(Parser* parser) {
     Lexer* lexer = parser->lexer;
     Token* token = consume_token(lexer);
 
     Primary* primary = new_expression(EXPRESSION_PRIMARY);
+
     primary->token = copy_token(token);
 
     switch (token->kind) {
@@ -237,8 +197,8 @@ static Expression* parse_primary_expression(Parser* parser) {
             break;
         }
         case TOKEN_STRING : {
-            primary->string = token->name;
             primary->kind   = PRIMARY_STRING;
+            primary->string = token->name;
             break;
         }
         default : {
@@ -246,39 +206,103 @@ static Expression* parse_primary_expression(Parser* parser) {
         }
     }
 
-    assert(primary->kind);
     return (Expression *)primary;
+}
+
+static Expression* parse_suffix_expression(Parser* parser, Expression* previous) {
+    Lexer* lexer = parser->lexer;
+    Token* token = consume_token(lexer);
+
+    if (token->kind == TOKEN_OPEN_PARENTHESIS) {
+        // Function call expression.
+        Call* call = new_call();
+
+        call->expression = previous;
+        call->token      = copy_token(token);
+
+        token = current_token(lexer);
+
+        while (token->kind != TOKEN_CLOSE_PARENTHESIS && token->kind != TOKEN_END_OF_FILE) {
+
+            Expression* expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+            list_add_last(&expression->list_node, &call->arguments);
+            
+            token = current_token(lexer);
+
+            if (token->kind != TOKEN_CLOSE_PARENTHESIS) {
+                token = skip_token(lexer, TOKEN_COMMA);
+            }
+        }
+
+        skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
+        return parse_suffix_expression(parser, (Expression *)call);
+    }
+    else if (token->kind == TOKEN_OPEN_SQUARE) {
+        // Array expression.
+        // We do not have any separate structure for the array expresion since it is basically just 
+        // a deref. Thus we convert array[10] to *(array + 10).
+        Unary* unary = new_expression(EXPRESSION_UNARY);
+        Binary* binary = new_binary(BINARY_PLUS);
+
+        binary->operator = copy_token(token);
+        binary->left     = previous;
+        binary->right    = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+
+        unary->kind     = UNARY_DEREF;
+        unary->operator = binary->operator;
+        unary->operand  = (Expression *)binary;
+
+        skip_token(lexer, TOKEN_CLOSE_SQUARE);
+        return parse_suffix_expression(parser, (Expression *)unary);
+    }
+    else if (token->kind == TOKEN_DOT) {
+        // Struct member access.
+        Dot* dot = new_expression(EXPRESSION_DOT);
+
+        dot->dot_token  = copy_token(token);
+        dot->member     = copy_token(current_token(lexer));
+        dot->expression = previous;
+        
+        skip_token(lexer, TOKEN_IDENTIFIER);
+        return parse_suffix_expression(parser, (Expression *)dot);
+    }
+
+    undo_next_token(lexer);
+    return previous;
 }
 
 static Statement* parse_expression_statement(Parser* parser) {
     Statement* statement = new_statement(STATEMENT_EXPRESSION);
+    
     statement->expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+
     skip_token(parser->lexer, TOKEN_SEMICOLON);
     return statement;
 }
 
-static Statement* parse_if_statement(Parser* parser) {
+static Statement* parse_conditional_statement(Parser* parser) {
     Lexer* lexer = parser->lexer;
     Token* token = next_token(lexer);
 
-    Conditional* cond = new_statement(STATEMENT_CONDITIONAL);
+    Conditional* conditional = new_statement(STATEMENT_CONDITIONAL);
 
-    cond->condition = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
-    cond->true_body = parse_compound_statement(parser);
+    conditional->condition = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
+    conditional->true_body = parse_compound_statement(parser);
 
     token = current_token(lexer);
+
     if (is_keyword(token, KEYWORD_ELSE)) {
         token = next_token(lexer);
 
         if (is_keyword(token, KEYWORD_IF)) {
-            cond->false_body = parse_if_statement(parser);
+            conditional->false_body = parse_conditional_statement(parser);
         }
         else {
-            cond->false_body = parse_compound_statement(parser);
+            conditional->false_body = parse_compound_statement(parser);
         }
     }
 
-    return (Statement *)cond;
+    return (Statement *)conditional;
 }
 
 static Statement* parse_while_statement(Parser* parser) {
@@ -286,13 +310,14 @@ static Statement* parse_while_statement(Parser* parser) {
     Token* token = next_token(lexer);
 
     Loop* loop = new_statement(STATEMENT_LOOP);
+
     loop->condition = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
-    loop->body = parse_compound_statement(parser);
+    loop->body      = parse_compound_statement(parser);
 
     return (Statement *)loop;
 }
 
-// for i in 0..5
+// // Fix this crap.
 static Statement* parse_for_statement(Parser* parser) {
     Lexer* lexer = parser->lexer;
     Token* token = expect_token(lexer, TOKEN_IDENTIFIER);
@@ -366,23 +391,20 @@ static Statement* parse_statement(Parser* parser) {
         return statement;
     }
     else if (token->kind == TOKEN_OPEN_CURLY) {
-        // User defined compund statement.
         return parse_compound_statement(parser);
     }
     else if (is_keyword(token, KEYWORD_RETURN)) {
-        next_token(lexer);  // Skip the return token.
-
         ReturnStatement* Return = new_statement(STATEMENT_RETURN);
+        skip_token(lexer, TOKEN_IDENTIFIER);
         Return->return_expression = parse_expression(parser, EXPRESSION_INIT_PRIORITY);
-
-        skip_token(lexer, TOKEN_SEMICOLON);
+        skip_token(lexer, TOKEN_SEMICOLON); 
         return (Statement *)Return;
     }
     else if (is_keyword(token, KEYWORD_FOR)) {
         return parse_for_statement(parser);
     }
     else if (is_keyword(token, KEYWORD_IF)) {
-        return parse_if_statement(parser);
+        return parse_conditional_statement(parser);
     }
     else if (is_keyword(token, KEYWORD_WHILE)) {
         return parse_while_statement(parser);
@@ -391,8 +413,9 @@ static Statement* parse_statement(Parser* parser) {
     return parse_expression_statement(parser);
 }
 
-// If this function parses a pure declaration without any init expression, it will not return
-// anything. Otherwise, we return either the init expression statement or just a normal statement.
+// Parse compound statement will call this function. This will either parse a declaration or a 
+// statement. If we only have a declaration without an init expression, the declaration are just 
+// pushed onto the current scope, and we return 0.
 static Statement* try_parse_declaration_or_statement(Parser* parser) {
     Statement* statement;
     if (try_parse_declaration(parser, &statement)) {
@@ -403,6 +426,7 @@ static Statement* try_parse_declaration_or_statement(Parser* parser) {
         return 0;
     }
 
+    // Will always return.
     return parse_statement(parser);
 }
 
@@ -438,15 +462,16 @@ static Type* parse_type(Parser* parser) {
         return type_char;
     }
     else if (token->kind == TOKEN_MULTIPLICATION) {
-        // Regular pointer.
+        // Pointer.
         PointerType* pointer = new_pointer();
         pointer->pointer_to = parse_type(parser);
         return (Type *)pointer;
     }
     else if (token->kind == TOKEN_OPEN_SQUARE) {
-        // Array type.
+        // Array.
         token = current_token(lexer);
         
+        // The array expression must be known at compile-time.
         if (token->kind != TOKEN_NUMBER) {
             error_token(token, "cannot evaluate non-constant expressions currently");
         }
@@ -458,45 +483,48 @@ static Type* parse_type(Parser* parser) {
         skip_token(lexer, TOKEN_CLOSE_SQUARE);
 
         type->pointer.pointer_to = parse_type(parser);
-
-
-        type->size = type->pointer.count * type->pointer.pointer_to->size;
         return type;
     }
     else if (token->kind == TOKEN_IDENTIFIER) {
-        // The identifier may have a valid reference in the code. We mark it as unknown at this 
-        // point. The typer will in a later pass will replace this type.
+        // At this point we do not know if the identifier is a valid typedef. We mark it as unknown 
+        // and resolves it in a later pass.
         Type* type = new_type(TYPE_UNKNOWN);
         type->unknown.token = copy_token(token);
         return type;
     }
 
-    undo_next_token(lexer);
-    
-    // Todo: I do not know if this should yield an error in all cases. If this function end up 
-    // returning null, we have to check for that troughout the code.
     error_token(token, "expecting a type");
 }
 
+// The declaration parser is not only restricted to variable declarations, and may parse other 
+// declarations as well. This is the reason we have to use a separate function when parsing a 
+// function argument.
 static void parse_function_argument(Parser* parser) {
     Lexer* lexer = parser->lexer;
     Declaration* declaration = new_declaration();
 
-    declaration->kind = DECLARATION_VARIABLE;
+    declaration->kind       = DECLARATION_VARIABLE;
     declaration->name_token = copy_token(consume_token(lexer));
+    declaration->name       = declaration->name_token->name;
+
     skip_token(lexer, TOKEN_COLON);
+
     declaration->type = parse_type(parser);
 
     if (declaration->name_token->kind != TOKEN_IDENTIFIER) {
-        error_token(declaration->name_token, "argument error");
+        error_token(declaration->name_token, "expecting an identifier as a function argument.");
     }
 
-    declaration->name = declaration->name_token->name;
     push_declaration_on_current_scope(declaration, parser);
 }
 
+// A struct scope will contain all members within a struct namespace. A struct namespace contains
+// all structures and members that can be accessed from the same dot member.
+// 
+// The scope will be used to accelerate struct member lookup. Since we are not looking up any 
+// members in anonymous structures (because an anonymous structure cannot be reached from a dot
+// member), only tagged structures will have a struct scope.
 static StructScope* enter_struct_scope(Parser* parser) {
-    printf("enter new scope\n");
     StructScope* scope = new_struct_scope();
 
     scope->parent = parser->current_struct_scope;
@@ -506,47 +534,14 @@ static StructScope* enter_struct_scope(Parser* parser) {
 }
 
 static void exit_struct_scope(Parser* parser) {
-    printf("exit current scope\n");
     assert(parser->current_struct_scope);
     parser->current_struct_scope = parser->current_struct_scope->parent;
 }
 
-static StructMember* parse_struct_member(Parser* parser) {
-    Lexer* lexer = parser->lexer;
-    Token* token = current_token(lexer);
-
-    assert(parser->current_struct_scope);
-
-    if (token->kind != TOKEN_IDENTIFIER) {
-        error_token(token, "expecting either a tag or a struct / union keyword.");
-    }
-
-    StructMember* member = new_struct_member();
-    member->is_anonymous = true;
-
-    if (!is_keyword(token, KEYWORD_STRUCT) && !is_keyword(token, KEYWORD_UNION)) {
-        member->is_anonymous = false;
-        member->name         = token->name;
-        member->token        = copy_token(token);
-
-        token = skip_token(lexer, TOKEN_IDENTIFIER);
-        token = skip_token(lexer, TOKEN_COLON);
-    }
-
-    if (is_keyword(token, KEYWORD_STRUCT) || is_keyword(token, KEYWORD_UNION)) {
-        member->type = parse_struct_declaration(parser, member->is_anonymous);
-    }
-    else {
-        member->type = parse_type(parser);
-        skip_token(lexer, TOKEN_SEMICOLON);
-    }
-
-    return member;
-}
-
 static void push_struct_member_on_current_scope(StructMember* member, Parser* parser) {
     // We are not pushing anonymous members on the current scope. They will be tracked by the tree
-    // structure.
+    // structure instead, the reason being that anonymous struct are never the target for any dot 
+    // access.
     if (member->is_anonymous) {
         return;
     }
@@ -568,15 +563,54 @@ static bool does_struct_member_exist(StructMember* member, Parser* parser) {
     return false;
 }
 
+// Question: what is happening if using an anonymous top level structure
+// token : struct {
+//    
+// }
+// will the structure in this case have a scope or not?
+static StructMember* parse_struct_member(Parser* parser) {
+    Lexer* lexer = parser->lexer;
+    Token* token = current_token(lexer);
+
+    assert(parser->current_struct_scope);
+
+    if (token->kind != TOKEN_IDENTIFIER) {
+        error_token(token, "expecting either a tag or a struct / union keyword.");
+    }
+
+    StructMember* member = new_struct_member();
+    member->is_anonymous = true;
+
+    if (!is_keyword(token, KEYWORD_STRUCT) && !is_keyword(token, KEYWORD_UNION)) {
+        // Tagged struct or a regular struct member.
+        member->token        = copy_token(token);
+        member->name         = token->name;
+        member->is_anonymous = false;
+
+        token = skip_token(lexer, TOKEN_IDENTIFIER);
+        token = skip_token(lexer, TOKEN_COLON);
+    }
+
+    if (is_keyword(token, KEYWORD_STRUCT) || is_keyword(token, KEYWORD_UNION)) {
+        member->type = parse_struct_declaration(parser, member->is_anonymous);
+    }
+    else {
+        member->type = parse_type(parser);
+        skip_token(lexer, TOKEN_SEMICOLON);
+    }
+
+    return member;
+}
+
 static Type* parse_struct_declaration(Parser* parser, bool is_anonymous) {
     Lexer* lexer = parser->lexer;
     Token* token = consume_token(lexer);
 
     StructType* type = new_struct();
-
     type->is_struct = is_keyword(token, KEYWORD_STRUCT);
+    
+    // If this is a tagged structure, create a new scope.
     if (!is_anonymous) {
-        // This is a tagged structure so we have to open a new scope.
         type->scope = enter_struct_scope(parser);
     }
 
@@ -606,8 +640,8 @@ static Type* parse_struct_declaration(Parser* parser, bool is_anonymous) {
 }
 
 // If a declaration is parsed successfully and pushed to the scope, this funciton returns true. If
-// the declaration also contains an init expression, we convert it to an expression statement and 
-// return that as an init_statement.
+// the declaration also contains an init expression, we convert it into an expression statement and 
+// return that in the init_statement.
 static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
     Lexer* lexer = parser->lexer;
     Token* token = current_token(lexer);
@@ -628,7 +662,6 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
     declaration->name_token = copy_token(token);
     declaration->name       = token->name;
 
-    // Typedefs are recognized by a double colon.
     bool is_typedef = (next->kind == TOKEN_DOUBLE_COLON);
 
     token = next_token(lexer);   // Skip the declaration name.
@@ -641,24 +674,23 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
         // only contain the function argument declarations. The second scope is opened automatically
         // by the compound statement.
         Scope* scope = enter_scope(parser);
-
         Function* function = &declaration->function;
-        function->function_scope = scope;
+
+        function->function_scope    = scope;
         function->assembly_function = is_keyword(token, KEYWORD_ASM);
 
-        token = next_token(lexer);  // Skip the function keyword.
+        token = skip_token(lexer, TOKEN_IDENTIFIER);
         token = skip_token(lexer, TOKEN_OPEN_PARENTHESIS);
         
         // Parse the function argumenets.
-        while (token->kind != TOKEN_END_OF_FILE && token->kind != TOKEN_CLOSE_PARENTHESIS) {
+        while (token->kind != TOKEN_CLOSE_PARENTHESIS && token->kind != TOKEN_END_OF_FILE) {
             parse_function_argument(parser);
 
             token = current_token(lexer);
-            if (token->kind != TOKEN_COMMA) {
-                break;
-            }
 
-            token = skip_token(lexer, TOKEN_COMMA);
+            if (token->kind != TOKEN_CLOSE_PARENTHESIS) {
+                token = skip_token(lexer, TOKEN_COMMA);
+            }
         }
 
         token = skip_token(lexer, TOKEN_CLOSE_PARENTHESIS);
@@ -669,6 +701,7 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
             function->return_type = parse_type(parser);
         }
 
+        // Fix: this has to be fixed.
         if (function->assembly_function) {
             token = skip_token(lexer, TOKEN_OPEN_CURLY);
 
@@ -684,8 +717,8 @@ static bool try_parse_declaration(Parser* parser, Statement** init_statement) {
         else {
             function->body = parse_compound_statement(parser);
         }
-        exit_scope(parser);
 
+        exit_scope(parser);
         push_declaration_on_current_scope(declaration, parser);
         return true;
     }
@@ -820,16 +853,12 @@ static void push_declaration_on_current_scope(Declaration* declaration, Parser* 
 
 static Statement* parse_block(Parser* parser) {
     Scope* scope = enter_scope(parser);
-
-    // Link the compound statement to the current scope. So that we can get the scope just from 
-    // looking at the compound statement.
     Compound* compound = new_compound_statement();
     compound->scope = scope;
 
     Lexer* lexer = parser->lexer;
     Token* token = current_token(lexer);
 
-    // Todo: we must track if we are in the top level scope.
     while (token->kind != TOKEN_END_OF_FILE && token->kind != TOKEN_CLOSE_CURLY) {
         Statement* statement = try_parse_declaration_or_statement(parser);
 
@@ -857,7 +886,9 @@ static Statement* parse_compound_statement(Parser* parser) {
 Parser* new_parser(Lexer* lexer) {
     Parser* parser = calloc(1, sizeof(Parser));
     parser->lexer = lexer;
-    next_token(lexer);  // This must be done in order to start the lexer.
+
+    // This must be called prior to using the lexer.
+    next_token(lexer);
     return parser;
 }
 

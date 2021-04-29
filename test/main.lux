@@ -1,20 +1,4 @@
-File :: struct {
-    dummy: [216] u8;
-}
-
-
-read_file : func (name: * char, buffer: **char) {
-    file : * File;
-
-    fseek(file, 0, 2);
-    file_size : u32 ;
-    
-    
-    fseek(file, 0, 0);  
-}
-
-
-syscall_print : asm (text: * char, size : u64) -> u32 {
+syscall_print : asm (text: * char, size : u64) {
     mov %rsi, %rdx
     mov $1, %rax
     mov $1, %rbx
@@ -23,8 +7,6 @@ syscall_print : asm (text: * char, size : u64) -> u32 {
     syscall
     ret
 }
-
-print : func (out text: * char, data: u32)
 
 print : func (text: * char) {
     size := 0;
@@ -38,6 +20,36 @@ print : func (text: * char) {
     syscall_print(text, size);
 }
 
+
 main : func (argument_count: u64, arguments: **char) {
     print("this is cool\n");
+
+    counter = 0;
+
+    for i in 0 .. 10000 {
+        printf("%d\n", counter);
+        counter = counter + 1;
+    }
+
+    token : struct {
+        a : u32;
+        b : u32;
+
+        test : union {
+            data: IPv4;
+            struct {
+                new_data : u64;
+            }
+        }
+    }
+
+    token.b = 45;
+    token.test.data = 45;
+
+    printf("Token is %d\n", token.test.data);
+    printf("Token is %d\n", token.test.new_data);
+    
+    counter : u32 = 34;
 }
+
+IPv4 :: u32;
